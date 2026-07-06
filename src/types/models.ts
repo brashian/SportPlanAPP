@@ -38,14 +38,17 @@ export const VOLUME_LEVELS: VolumeLevel[] = ["Bajo", "Medio", "Alto"];
 // ----------------------------------------------------------------------------
 export interface DailyBlock {
   id: string;
+  mesocyclyId: string;
   date: string; // ISO "yyyy-MM-dd"
   sessionType: string; // Ej: "Fuerza", "Técnico", "Táctico", "Recuperación"
   intensity: number; // Escala 1-10
-  volume: VolumeLevel;
+  volume: "Bajo" | "Medio" | "Alto";
   durationMinutes: number;
-  notesHtml: string; // HTML enriquecido generado por React-Quill
+  notesHtml: string; 
   createdAt: string;
   updatedAt: string;
+  //ejercicios anachi
+  exercises?: {id:string, name: string, reps:String, weight:string}[];
 }
 
 // ----------------------------------------------------------------------------
@@ -106,12 +109,15 @@ export interface Athlete {
   id: string;
   firstName: string;
   lastName: string;
+  name?: string;
   email: string;
   coachId: string;
   avatarUrl?: string;
   // Relación 1:N — un atleta acumula TODO su historial de macrociclos a lo
   // largo de los años (temporadas, recuperaciones de lesión, etc.) sin perder
   // el pasado al armar uno nuevo.
+  sport: string;
+  phone?: string;
   macrocycles: Macrocycle[];
 }
 
