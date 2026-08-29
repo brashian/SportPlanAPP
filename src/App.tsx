@@ -1,23 +1,33 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, lazy, Suspense } from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
 import type { AuthUser, Athlete, DailyBlock, Mesocycle, MesocyclePhase, Macrocycle } from "./types/models";
-import CoachLayout from "./components/coach/CoachLayout";
-import AthleteListView from "./components/coach/AthleteListView";
-import AthleteDetailView from "./components/coach/AthleteDetailView";
-import AthleteLayout from "./components/athlete/AthleteLayout";
-import AthleteView from "./components/athlete/AthleteView";
-
-// Base FireStore
 import { db, auth } from "./firebase"; 
-import { collection, doc, setDoc, getDoc, getDocs, query, where, updateDoc, arrayUnion, deleteDoc, addDoc } from "firebase/firestore";
-
-// LogIn
+import { collection, doc, setDoc, getDoc, getDocs, query, where, updateDoc, arrayUnion, deleteDoc } from "firebase/firestore";
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import LoginView from './components/log/LoginView'; 
+import { AlertCircle, LogOut } from 'lucide-react';
+
+const PlanningView = lazy(() => import("./components/coach/PlanningView"));
+const CoachLayout = lazy(() => import("./components/coach/CoachLayout"));
+const AthleteListView = lazy(() => import("./components/coach/AthleteListView"));
+const AthleteDetailView = lazy(() => import("./components/coach/AthleteDetailView"));
+const AthleteLayout = lazy(() => import("./components/athlete/AthleteLayout"));
+const AthleteView = lazy(() => import("./components/athlete/AthleteView"));
+const RoutineLibrary = lazy(() => import("./components/coach/RoutineLibrary"));
+
+const LoadingFallback = () => (
+  <div className="min-h-screen flex items-center justify-center text-blue-600 font-bold bg-slate-50">
+    <div className="flex flex-col items-center gap-3">
+      <div className="w-10 h-10 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin"></div>
+      <p>Cargando plataforma...</p>
+    </div>
+  </div>
+);
 
 export default function App() {
   const [user, setUser] = useState<any>(null);
   const [role, setRole] = useState<string | null>(null);
+  const [isApproved, setIsApproved] = useState<boolean | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -26,13 +36,17 @@ export default function App() {
         setUser(currentUser);
         const userDoc = await getDoc(doc(db, 'users', currentUser.uid));
         if (userDoc.exists()) {
-          setRole(userDoc.data().role);
+          const data = userDoc.data();
+          setRole(data.role);
+          setIsApproved(data.isApproved ?? true); 
         } else {
           setRole('athlete'); 
+          setIsApproved(true);
         }
       } else {
         setUser(null);
         setRole(null);
+        setIsApproved(null);
       }
       setLoading(false);
     });
@@ -40,61 +54,63 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  if (loading) {
-    return <div className="min-h-screen flex items-center justify-center text-gray-500">Cargando aplicación...</div>;
+  if (loading) return <LoadingFallback />;
+  if (!user) return <LoginView />;
+
+  if (role === 'coach' && isApproved === false) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
+        <div className="bg-white max-w-md w-full rounded-3xl shadow-xl p-8 text-center border border-slate-100 animate-in zoom-in-95 duration-300">
+          <div className="w-20 h-20 bg-amber-100 text-amber-500 rounded-full flex items-center justify-center mx-auto mb-6 shadow-inner">
+            <AlertCircle size={40} />
+          </div>
+          <h2 className="text-2xl font-black text-slate-800 mb-3">Cuenta en Revisión</h2>
+          <p className="text-slate-500 mb-8 leading-relaxed font-medium">
+            Tu registro como Entrenador se completó con éxito, pero tu cuenta requiere la aprobación del Administrador Principal para acceder a la base de datos de atletas. Por favor, aguarda la confirmación.
+          </p>
+          <button onClick={() => signOut(auth)} className="w-full bg-slate-900 hover:bg-black text-white font-bold py-3.5 rounded-xl transition-all shadow-lg active:scale-95 flex items-center justify-center gap-2">
+            <LogOut size={18} /> Cerrar Sesión
+          </button>
+        </div>
+      </div>
+    );
   }
 
-  if (!user) {
-    return <LoginView />;
-  }
-
-  if (role === 'coach') {
-    // Le pasamos el email también al Coach
-    return <CoachApp currentUser={{ id: user.uid, role: 'coach', name: user.email || "Coach", email: user.email }} />;
-  }
-
-  // Le pasamos el email al Atleta
-  return <AthleteApp currentUser={{ id: user.uid, role: 'athlete', name: user.email || "Atleta", email: user.email }} />;
+  return (
+    <Suspense fallback={<LoadingFallback />}>
+      {role === 'coach' ? (
+        <CoachApp currentUser={{ id: user.uid, role: 'coach', name: user.email || "Coach", email: user.email }} />
+      ) : (
+        <AthleteApp currentUser={{ id: user.uid, role: 'athlete', name: user.email || "Atleta", email: user.email }} />
+      )}
+    </Suspense>
+  );
 }
 
-// ============================================================================
-// Rama Coach (No cambió, funciona perfecto)
-// ============================================================================
 function CoachApp({ currentUser }: { currentUser: any }) {
   const coachId = currentUser.id;
   const coachName = currentUser.name;
 
   const [athletes, setAthletes] = useState<Athlete[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [blocksByMesocycle, setBlocksByMesocycle] = useState<Record<string, DailyBlock[]>>({});
 
   useEffect(() => {
     async function fetchAthletes() {
       try {
         const q = query(collection(db, "athletes"), where("coachId", "==", coachId));
         const querySnapshot = await getDocs(q);
-        
         const fetchedAthletes: Athlete[] = [];
         querySnapshot.forEach((doc) => {
           const data = doc.data();
           fetchedAthletes.push({
-            id: doc.id,
-            coachId: data.coachId,
-            name: data.name,
-            firstName: data.firstName || "",
-            lastName: data.lastName || "",
-            sport: data.sport,
-            email: data.email || "",
-            phone: data.phone || "",
-            macrocycles: data.macrocycles || [], 
+            id: doc.id, coachId: data.coachId, name: data.name, firstName: data.firstName || "",
+            lastName: data.lastName || "", sport: data.sport, email: data.email || "", 
+            phone: data.phone || "", macrocycles: data.macrocycles || [], 
           } as Athlete);
         });
         setAthletes(fetchedAthletes);
-      } catch (error) {
-        console.error("Error al traer los atletas:", error);
-      } finally {
-        setIsLoading(false);
-      }
+      } catch (error) { console.error("Error al traer los atletas:", error); } 
+      finally { setIsLoading(false); }
     }
     fetchAthletes();
   }, [coachId]);
@@ -108,10 +124,22 @@ function CoachApp({ currentUser }: { currentUser: any }) {
       };
       await setDoc(newAthleteRef, newAthlete);
       setAthletes((prev) => [...prev, newAthlete]);
-    } catch (error) {
-      console.error("Error al guardar en Firestore:", error);
-      alert("Hubo un error al guardar el atleta.");
-    }
+    } catch (error) { alert("Hubo un error al guardar el atleta."); }
+  }
+
+  async function handleUpdateAthlete(athleteId: string, data: { name: string; sport: string; email?: string; phone?: string }) {
+    try {
+      await updateDoc(doc(db, "athletes", athleteId), data);
+      setAthletes((prev) => prev.map((a) => a.id === athleteId ? { ...a, ...data } : a));
+    } catch (error) { alert("Error al actualizar el atleta."); throw error; }
+  }
+
+  async function handleDeleteAthlete(athleteId: string) {
+    try {
+      await deleteDoc(doc(db, "athletes", athleteId));
+      setAthletes((prev) => prev.filter((a) => a.id !== athleteId));
+      return true;
+    } catch (error) { alert("Error al eliminar."); return false; }
   }
 
   async function handleCreateMacrocycle(athleteId: string, data: { name: string; startDate: string; endDate: string }) {
@@ -123,10 +151,16 @@ function CoachApp({ currentUser }: { currentUser: any }) {
       };
       await setDoc(newMacroRef, newMacro);
       setAthletes((prev) => prev.map((a) => a.id !== athleteId ? a : { ...a, macrocycles: [...(a.macrocycles || []), newMacro] }));
-    } catch (error) {
-      console.error("Error al guardar macrociclo:", error);
-      alert("Error al crear el macrociclo.");
-    }
+    } catch (error) { alert("Error al crear el macrociclo."); }
+  }
+
+  async function handleDeleteMacrocycle(macrocycleId: string, athleteId: string) {
+    try {
+      await deleteDoc(doc(db, "macrocycles", macrocycleId));
+      setAthletes((prev) => prev.map((a) => a.id !== athleteId ? a : { 
+        ...a, macrocycles: a.macrocycles.filter((m) => m.id !== macrocycleId) 
+      }));
+    } catch (error) { alert("Error al eliminar."); }
   }
 
   function handleLoadMacrocycles(athleteId: string, fetchedMacros: Macrocycle[]) {
@@ -157,10 +191,21 @@ function CoachApp({ currentUser }: { currentUser: any }) {
           m.id !== macrocycleId ? m : { ...m, mesocycles: [...(m.mesocycles || []), newMesocycle] }
         ),
       })));
-    } catch (error) {
-      console.error("Error al crear mesociclo:", error);
-      alert("Hubo un error al guardar el mesociclo.");
-    }
+    } catch (error) { alert("Hubo un error al guardar el mesociclo."); }
+  }
+
+  async function handleDeleteMesocycle(macrocycleId: string, mesocycleId: string) {
+    try {
+      const macro = athletes.flatMap(a => a.macrocycles || []).find(m => m.id === macrocycleId);
+      if (!macro) return;
+      const updatedMesos = macro.mesocycles.filter(m => m.id !== mesocycleId);
+      await updateDoc(doc(db, "macrocycles", macrocycleId), { mesocycles: updatedMesos });
+      await deleteDoc(doc(db, "mesocycleBlocks", mesocycleId));
+
+      setAthletes((prev) => prev.map((a) => ({
+        ...a, macrocycles: a.macrocycles.map((m) => m.id !== macrocycleId ? m : { ...m, mesocycles: updatedMesos })
+      })));
+    } catch (error) { alert("Error al eliminar."); }
   }
 
   function handleUpdateMesocycle(mesocycleId: string, data: { name: string; phase: MesocyclePhase; startDate: string; endDate: string }) {
@@ -177,50 +222,7 @@ function CoachApp({ currentUser }: { currentUser: any }) {
     })));
   }
 
-  function handleLoadBlocks(mesocycleId: string, fetchedBlocks: DailyBlock[]) {
-    setBlocksByMesocycle((prev) => ({ ...prev, [mesocycleId]: fetchedBlocks }));
-  }
-
-  async function handleSaveBlock(mesocycleId: string, blockData: any, existingBlockId?: string) {
-    try {
-      const now = new Date().toISOString();
-      if (existingBlockId) {
-        const blockRef = doc(db, "dailyBlocks", existingBlockId);
-        await updateDoc(blockRef, { ...blockData, updatedAt: now });
-        setBlocksByMesocycle((prev) => {
-          const current = prev[mesocycleId] ?? [];
-          return { ...prev, [mesocycleId]: current.map((b) => b.id !== existingBlockId ? b : { ...b, ...blockData, updatedAt: now }) };
-        });
-      } else {
-        const newBlockRef = doc(collection(db, "dailyBlocks"));
-        const newBlock = { ...blockData, id: newBlockRef.id, mesocycleId, createdAt: now, updatedAt: now };
-        await setDoc(newBlockRef, newBlock);
-        setBlocksByMesocycle((prev) => {
-          const current = prev[mesocycleId] ?? [];
-          return { ...prev, [mesocycleId]: [...current, newBlock] };
-        });
-      }
-    } catch (error) {
-      console.error("Error guardando el bloque:", error);
-      alert("Hubo un error al guardar el entrenamiento.");
-    }
-  }
-
-  async function handleDeleteBlock(mesocycleId: string, blockId: string) {
-    try {
-      await deleteDoc(doc(db, "dailyBlocks", blockId));
-      setBlocksByMesocycle((prev) => ({
-        ...prev, [mesocycleId]: (prev[mesocycleId] ?? []).filter((b) => b.id !== blockId),
-      }));
-    } catch (error) {
-      console.error("Error borrando el bloque:", error);
-      alert("Hubo un error al intentar eliminar el entrenamiento.");
-    }
-  }
-
-  if (isLoading) {
-    return <div className="p-8 text-center text-gray-400">Cargando tus atletas desde la nube...</div>;
-  }
+  if (isLoading) return <div className="p-8 text-center text-gray-400">Cargando tus atletas...</div>;
 
   return (
     <Routes>
@@ -235,29 +237,26 @@ function CoachApp({ currentUser }: { currentUser: any }) {
               onLoadMacrocycles={handleLoadMacrocycles}
               onCreateMacrocycle={handleCreateMacrocycle}
               onUpdateMacrocycle={handleUpdateMacrocycle}
+              onDeleteMacrocycle={handleDeleteMacrocycle}
               onCreateMesocycle={handleCreateMesocycle}
               onUpdateMesocycle={handleUpdateMesocycle}
+              onDeleteMesocycle={handleDeleteMesocycle}
               onReorderMesocycles={handleReorderMesocycles}
-              blocksByMesocycle={blocksByMesocycle}
-              onLoadBlocks={handleLoadBlocks}
-              onSaveBlock={handleSaveBlock}
-              onDeleteBlock={handleDeleteBlock}
+              onUpdateAthlete={handleUpdateAthlete} 
+              onDeleteAthlete={handleDeleteAthlete} 
             />
           }
         />
-        <Route path="club" element={<div className="text-sm text-gray-500">Módulo "Planificación del Club"</div>} />
+        <Route path="library" element={<RoutineLibrary coachId={coachId} />} />
+        <Route path="planificacion" element={<PlanningView />} />
         <Route path="*" element={<Navigate to="/athletes" replace />} />
       </Route>
     </Routes>
   );
 }
 
-// ============================================================================
-// Rama Atleta (AHORA CONECTADA A FIREBASE REAL)
-// ============================================================================
 function AthleteApp({ currentUser }: { currentUser: any }) {
-  const athleteEmail = currentUser.email; // Tomamos el email con el que inició sesión
-
+  const athleteEmail = currentUser.email;
   const [athlete, setAthlete] = useState<Athlete | null>(null);
   const [blocksByMesocycle, setBlocksByMesocycle] = useState<Record<string, DailyBlock[]>>({});
   const [isLoading, setIsLoading] = useState(true);
@@ -266,83 +265,72 @@ function AthleteApp({ currentUser }: { currentUser: any }) {
     async function fetchAthleteData() {
       if (!athleteEmail) return;
       try {
-        // 1. Buscamos al atleta en la base de datos usando su Email
         const q = query(collection(db, "athletes"), where("email", "==", athleteEmail));
         const snapshot = await getDocs(q);
-        
-        if (snapshot.empty) {
-          setAthlete(null); // No hay atleta con ese email vinculado
-          setIsLoading(false);
-          return;
-        }
-
-        // 2. Tomamos los datos del atleta encontrado
+        if (snapshot.empty) { setAthlete(null); setIsLoading(false); return; }
         const athleteDoc = snapshot.docs[0];
         const athleteData = { id: athleteDoc.id, ...athleteDoc.data() } as Athlete;
         
-        // 3. Traemos sus macrociclos
         const macroQuery = query(collection(db, "macrocycles"), where("athleteId", "==", athleteData.id));
         const macroSnap = await getDocs(macroQuery);
         const macros: Macrocycle[] = [];
-        
-        macroSnap.forEach(doc => {
-          macros.push({ id: doc.id, ...doc.data() } as Macrocycle);
-        });
-        
-        // Ordenamos los macrociclos por fecha
+        macroSnap.forEach(doc => { macros.push({ id: doc.id, ...doc.data() } as Macrocycle); });
         macros.sort((a, b) => new Date(a.startDate).getTime() - new Date(b.startDate).getTime());
         athleteData.macrocycles = macros;
         setAthlete(athleteData);
 
-        // 4. Traemos todas sus rutinas (dailyBlocks) para que las pueda ver
         const blocksObj: Record<string, DailyBlock[]> = {};
+        const fetchPromises = [];
         for (const macro of macros) {
           for (const meso of macro.mesocycles || []) {
-            const blocksQ = query(collection(db, "dailyBlocks"), where("mesocycleId", "==", meso.id));
-            const blocksSnap = await getDocs(blocksQ);
-            const blocks: DailyBlock[] = [];
-            blocksSnap.forEach(b => blocks.push({ id: b.id, ...b.data() } as DailyBlock));
-            blocksObj[meso.id] = blocks;
+            const fetchTask = async () => {
+              const docRef = doc(db, "mesocycleBlocks", meso.id);
+              const docSnap = await getDoc(docRef);
+              if (docSnap.exists() && docSnap.data().blocks) {
+                blocksObj[meso.id] = Object.values(docSnap.data().blocks);
+              } else {
+                blocksObj[meso.id] = [];
+              }
+            };
+            fetchPromises.push(fetchTask());
           }
         }
+        await Promise.all(fetchPromises);
         setBlocksByMesocycle(blocksObj);
-
-      } catch (error) {
-        console.error("Error al cargar los datos del atleta:", error);
-      } finally {
-        setIsLoading(false);
-      }
+      } catch (error) { console.error(error); } 
+      finally { setIsLoading(false); }
     }
-    
     fetchAthleteData();
   }, [athleteEmail]);
 
-  if (isLoading) {
-    return <div className="min-h-screen flex items-center justify-center text-blue-600 font-bold">Buscando tu planificación en la nube...</div>;
-  }
+  if (isLoading) return (
+    <div className="min-h-screen flex items-center justify-center text-blue-600 font-bold bg-slate-50">
+      <div className="flex flex-col items-center gap-3">
+        <div className="w-10 h-10 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin"></div>
+        <p>Buscando tu planificación...</p>
+      </div>
+    </div>
+  );
 
-  // Pantalla que se muestra si el entrenador no lo agregó o escribió mal el email
   if (!athlete) {
     return (
-      <div className="p-8 text-center text-gray-700 bg-gray-50 min-h-screen flex flex-col items-center justify-center">
-        <h2 className="text-2xl font-bold mb-4">¡Hola!</h2>
-        <p className="text-gray-600 mb-2">Iniciaste sesión correctamente como: <strong>{athleteEmail}</strong></p>
-        <div className="bg-yellow-50 border border-yellow-200 text-yellow-800 p-4 rounded-lg max-w-md mt-4">
-          <p>Tu entrenador aún no ha vinculado tu cuenta.</p>
-          <p className="text-sm mt-2">Pídele que vaya a su panel de control y te agregue como atleta usando exactamente este mismo correo electrónico.</p>
+      <div className="p-8 text-center text-gray-700 bg-slate-50 min-h-screen flex flex-col items-center justify-center">
+        <div className="bg-white p-8 rounded-3xl shadow-xl max-w-md w-full border border-slate-100">
+          <h2 className="text-3xl font-black text-slate-800 mb-2">¡Hola!</h2>
+          <p className="text-slate-500 mb-6">Iniciaste sesión como: <br/><strong className="text-blue-600">{athleteEmail}</strong></p>
+          <div className="bg-amber-50 border border-amber-200 text-amber-800 p-5 rounded-2xl mb-8">
+            <p className="font-medium text-sm">Tu entrenador aún no ha vinculado tu cuenta a tu perfil de atleta. Pedile que te agregue usando este correo.</p>
+          </div>
+          <button onClick={() => signOut(auth)} className="w-full bg-slate-900 hover:bg-black text-white font-bold py-3.5 rounded-xl transition-all shadow-lg active:scale-95 flex items-center justify-center gap-2">
+            <LogOut size={18} /> Cerrar Sesión
+          </button>
         </div>
-        <button 
-          onClick={() => signOut(auth)} 
-          className="mt-8 px-4 py-2 bg-gray-200 hover:bg-gray-300 rounded font-bold text-gray-700 transition-colors"
-        >
-          Cerrar Sesión
-        </button>
       </div>
     );
   }
 
-  const fullName = athlete.firstName ? `${athlete.firstName} ${athlete.lastName}` : athlete.name;
-
+  const fullName = athlete.firstName ? `${athlete.firstName} ${athlete.lastName}` : (athlete.name || "Atleta");
+  
   return (
     <AthleteLayout athleteName={fullName}>
       <AthleteView athlete={athlete} blocksByMesocycle={blocksByMesocycle} />

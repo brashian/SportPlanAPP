@@ -1,5 +1,5 @@
-import React, { useState } from "react";
-import { Plus, Pencil } from "lucide-react";
+import React, { useState, useEffect, useMemo } from "react";
+import { Plus, Pencil, Loader2 } from "lucide-react";
 import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
 import type { DailyBlock, Macrocycle, Mesocycle, MesocyclePhase } from "../../types/models";
@@ -32,6 +32,25 @@ interface IndividualPlanningViewProps {
   ) => void;
   onDeleteBlock: (mesocycleId: string, blockId: string) => void;
 }
+
+// ── Helpers de fecha "seguros" respecto al huso horario ─────────────────────
+// new Date("YYYY-MM-DD") se interpreta como medianoche UTC: en husos negativos
+// (Argentina, UTC-3) el DatePicker termina mostrando el día anterior. Fijamos
+// la hora al mediodía para que nunca cruce el límite de día, y al formatear de
+// vuelta usamos los componentes locales en vez de toISOString() (que vuelve a
+// pasar por UTC). Mismo criterio que ya usa el resto del código (AthleteView,
+// AthleteDetailView) al parsear fechas de mesociclos.
+const parseLocalDate = (dateStr?: string): Date | null => {
+  if (!dateStr) return null;
+  return new Date(dateStr + "T12:00:00");
+};
+
+const formatLocalDate = (date: Date): string => {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+};
 
 /**
  * IndividualPlanningView
@@ -67,19 +86,46 @@ export default function IndividualPlanningView({
   const editingMesocycle = macrocycle.mesocycles.find((m) => m.id === editingMesoId);
   const activeBlocks = activeMesocycle ? blocksByMesocycle[activeMesocycle.id] ?? [] : [];
 
-  // Semanas calculadas automáticamente a partir de las fechas del mesociclo activo
-  const weeks = useMesocycleWeeks(
-    activeMesocycle ?? {
+  // Re-sincroniza activeMesoId si: (a) todavía no había ninguno seleccionado y
+  // los mesociclos llegaron después (fetch async), o (b) el mesociclo activo
+  // fue eliminado en otra pestaña/por otro coach y ya no existe en la lista.
+  // Sin esto, activeMesoId podía quedar apuntando a un id fantasma para siempre.
+  useEffect(() => {
+    const stillExists = macrocycle.mesocycles.some((m) => m.id === activeMesoId);
+    if (!stillExists) {
+      setActiveMesoId(macrocycle.mesocycles[0]?.id ?? null);
+      setEditingDate(null);
+      setEditingBlock(undefined);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [macrocycle.mesocycles]);
+
+  // Objeto estable para el fallback: si se recrea en cada render (como antes,
+  // inline en el JSX) invalida cualquier memoización interna de useMesocycleWeeks.
+  const fallbackMesocycle = useMemo(
+    () => ({
       id: "",
       macrocycleId: macrocycle.id,
       name: "",
-      phase: "Preparación General",
+      phase: "Preparación General" as MesocyclePhase,
       startDate: macrocycle.startDate,
       endDate: macrocycle.startDate,
       order: 0,
-    },
-    activeBlocks
+    }),
+    [macrocycle.id, macrocycle.startDate]
   );
+
+  // Semanas calculadas automáticamente a partir de las fechas del mesociclo activo
+  const weeks = useMesocycleWeeks(activeMesocycle ?? fallbackMesocycle, activeBlocks);
+
+  // Cambiar de mesociclo activo cierra el editor de día: si quedaba abierto
+  // con una fecha del mesociclo anterior, guardar hubiera escrito el bloque
+  // en el mesociclo nuevo con la fecha vieja (bug real, sin ningún aviso).
+  const handleSelectMesocycle = (mesoId: string) => {
+    setActiveMesoId(mesoId);
+    setEditingDate(null);
+    setEditingBlock(undefined);
+  };
 
   return (
     <div className="space-y-6">
@@ -105,7 +151,7 @@ export default function IndividualPlanningView({
           </div>
           <button
             onClick={() => setEditingMacro(true)}
-            className="flex items-center gap-1 text-sm text-blue-500 hover:underline"
+            className="flex items-center gap-1 text-sm text-blue-500 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 rounded-md px-1"
           >
             <Pencil size={14} /> Editar macrociclo
           </button>
@@ -124,7 +170,7 @@ export default function IndividualPlanningView({
                 setEditingMesoId(null);
                 setShowMesoForm(true);
               }}
-              className="flex items-center gap-1 text-xs text-white bg-blue-500 hover:bg-blue-600 px-2.5 py-1.5 rounded-lg"
+              className="flex items-center gap-1 text-xs text-white bg-blue-500 hover:bg-blue-600 px-2.5 py-1.5 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
             >
               <Plus size={14} /> Nuevo
             </button>
@@ -154,7 +200,7 @@ export default function IndividualPlanningView({
           <MesocycleDragList
             mesocycles={macrocycle.mesocycles}
             activeMesocycleId={activeMesoId}
-            onSelect={setActiveMesoId}
+            onSelect={handleSelectMesocycle}
             onEdit={(mesoId) => {
               setShowMesoForm(false);
               setEditingMesoId(mesoId);
@@ -235,39 +281,48 @@ function MacrocycleForm({
   onCancel?: () => void;
 }) {
   const [name, setName] = useState(initial?.name ?? "");
-  const [startDate, setStartDate] = useState<Date | null>(
-    initial ? new Date(initial.startDate) : null
-  );
-  const [endDate, setEndDate] = useState<Date | null>(initial ? new Date(initial.endDate) : null);
+  const [startDate, setStartDate] = useState<Date | null>(parseLocalDate(initial?.startDate));
+  const [endDate, setEndDate] = useState<Date | null>(parseLocalDate(initial?.endDate));
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const canSubmit = name.trim() && startDate && endDate;
+  const canSubmit = name.trim() && startDate && endDate && !isSubmitting;
 
   return (
     <form
-      onSubmit={(e) => {
+      onSubmit={async (e) => {
         e.preventDefault();
         if (!canSubmit) return;
-        onSubmit({
-          name,
-          startDate: startDate!.toISOString().slice(0, 10),
-          endDate: endDate!.toISOString().slice(0, 10),
-        });
+        setIsSubmitting(true);
+        try {
+          await onSubmit({
+            name,
+            startDate: formatLocalDate(startDate!),
+            endDate: formatLocalDate(endDate!),
+          });
+        } finally {
+          setIsSubmitting(false);
+        }
       }}
       className="rounded-xl border border-blue-100 bg-white p-4 space-y-3 shadow-card"
     >
       <h3 className="text-sm font-semibold text-gray-700">
         {initial ? "Editar Macrociclo" : "Nuevo Macrociclo"}
       </h3>
-      <input
-        value={name}
-        onChange={(e) => setName(e.target.value)}
-        placeholder="Ej: Temporada 2026"
-        className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none"
-      />
+      <div>
+        <label htmlFor="macro-form-name" className="sr-only">Nombre del macrociclo</label>
+        <input
+          id="macro-form-name"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="Ej: Temporada 2026"
+          className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none"
+        />
+      </div>
       <div className="grid grid-cols-2 gap-3">
         <div>
-          <label className="text-xs text-gray-500">Inicio</label>
+          <label htmlFor="macro-form-start" className="text-xs text-gray-500">Inicio</label>
           <DatePicker
+            id="macro-form-start"
             selected={startDate}
             onChange={setStartDate}
             dateFormat="dd/MM/yyyy"
@@ -276,8 +331,9 @@ function MacrocycleForm({
           />
         </div>
         <div>
-          <label className="text-xs text-gray-500">Fin</label>
+          <label htmlFor="macro-form-end" className="text-xs text-gray-500">Fin</label>
           <DatePicker
+            id="macro-form-end"
             selected={endDate}
             onChange={setEndDate}
             dateFormat="dd/MM/yyyy"
@@ -292,7 +348,7 @@ function MacrocycleForm({
           <button
             type="button"
             onClick={onCancel}
-            className="px-4 py-2 text-sm text-gray-500 hover:bg-gray-100 rounded-lg"
+            className="px-4 py-2 text-sm text-gray-500 hover:bg-gray-100 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-300"
           >
             Cancelar
           </button>
@@ -300,8 +356,9 @@ function MacrocycleForm({
         <button
           type="submit"
           disabled={!canSubmit}
-          className="rounded-lg bg-blue-500 disabled:bg-gray-200 disabled:text-gray-400 text-white text-sm font-medium px-4 py-2 hover:bg-blue-600 transition-colors"
+          className="rounded-lg bg-blue-500 disabled:bg-gray-200 disabled:text-gray-400 text-white text-sm font-medium px-4 py-2 hover:bg-blue-600 transition-colors flex items-center justify-center gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
         >
+          {isSubmitting && <Loader2 size={14} className="animate-spin" />}
           {initial ? "Guardar cambios" : "Crear macrociclo"}
         </button>
       </div>
@@ -323,70 +380,90 @@ function MesocycleForm({
 }) {
   const [name, setName] = useState(initial?.name ?? "");
   const [phase, setPhase] = useState<MesocyclePhase>(initial?.phase ?? MESOCYCLE_PHASES[0]);
-  const [startDate, setStartDate] = useState<Date | null>(
-    initial ? new Date(initial.startDate) : null
-  );
-  const [endDate, setEndDate] = useState<Date | null>(initial ? new Date(initial.endDate) : null);
+  const [startDate, setStartDate] = useState<Date | null>(parseLocalDate(initial?.startDate));
+  const [endDate, setEndDate] = useState<Date | null>(parseLocalDate(initial?.endDate));
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const canSubmit = name.trim() && startDate && endDate;
+  const canSubmit = name.trim() && startDate && endDate && !isSubmitting;
 
   return (
     <form
-      onSubmit={(e) => {
+      onSubmit={async (e) => {
         e.preventDefault();
         if (!canSubmit) return;
-        onSubmit({
-          name,
-          phase,
-          startDate: startDate!.toISOString().slice(0, 10),
-          endDate: endDate!.toISOString().slice(0, 10),
-        });
+        setIsSubmitting(true);
+        try {
+          await onSubmit({
+            name,
+            phase,
+            startDate: formatLocalDate(startDate!),
+            endDate: formatLocalDate(endDate!),
+          });
+        } finally {
+          setIsSubmitting(false);
+        }
       }}
       className="rounded-xl border border-blue-100 bg-white p-3 space-y-2 mb-3 shadow-card"
     >
       <p className="text-xs font-semibold text-gray-500">
         {initial ? "Editar mesociclo" : "Nuevo mesociclo"}
       </p>
-      <input
-        value={name}
-        onChange={(e) => setName(e.target.value)}
-        placeholder="Ej: Base General 1"
-        className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-blue-500 outline-none"
-      />
-      <select
-        value={phase}
-        onChange={(e) => setPhase(e.target.value as MesocyclePhase)}
-        className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-blue-500 outline-none"
-      >
-        {MESOCYCLE_PHASES.map((p) => (
-          <option key={p} value={p}>
-            {p}
-          </option>
-        ))}
-      </select>
+      <div>
+        <label htmlFor="meso-form-name" className="sr-only">Nombre del mesociclo</label>
+        <input
+          id="meso-form-name"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="Ej: Base General 1"
+          className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-blue-500 outline-none"
+        />
+      </div>
+      <div>
+        <label htmlFor="meso-form-phase" className="sr-only">Fase del mesociclo</label>
+        <select
+          id="meso-form-phase"
+          value={phase}
+          onChange={(e) => setPhase(e.target.value as MesocyclePhase)}
+          className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-blue-500 outline-none"
+        >
+          {MESOCYCLE_PHASES.map((p) => (
+            <option key={p} value={p}>
+              {p}
+            </option>
+          ))}
+        </select>
+      </div>
       <div className="grid grid-cols-2 gap-2">
-        <DatePicker
-          selected={startDate}
-          onChange={setStartDate}
-          dateFormat="dd/MM/yyyy"
-          placeholderText="Inicio"
-          className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm outline-none"
-        />
-        <DatePicker
-          selected={endDate}
-          onChange={setEndDate}
-          dateFormat="dd/MM/yyyy"
-          minDate={startDate ?? undefined}
-          placeholderText="Fin"
-          className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm outline-none"
-        />
+        <div>
+          <label htmlFor="meso-form-start" className="sr-only">Fecha de inicio</label>
+          <DatePicker
+            id="meso-form-start"
+            selected={startDate}
+            onChange={setStartDate}
+            dateFormat="dd/MM/yyyy"
+            placeholderText="Inicio"
+            className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm outline-none"
+          />
+        </div>
+        <div>
+          <label htmlFor="meso-form-end" className="sr-only">Fecha de fin</label>
+          <DatePicker
+            id="meso-form-end"
+            selected={endDate}
+            onChange={setEndDate}
+            dateFormat="dd/MM/yyyy"
+            minDate={startDate ?? undefined}
+            placeholderText="Fin"
+            className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm outline-none"
+          />
+        </div>
       </div>
       <div className="flex justify-end gap-2">
         {onCancel && (
           <button
             type="button"
             onClick={onCancel}
-            className="px-3 py-1.5 text-xs text-gray-500 hover:bg-gray-100 rounded-lg"
+            className="px-3 py-1.5 text-xs text-gray-500 hover:bg-gray-100 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-300"
           >
             Cancelar
           </button>
@@ -394,8 +471,9 @@ function MesocycleForm({
         <button
           type="submit"
           disabled={!canSubmit}
-          className="px-3 py-1.5 text-xs rounded-lg bg-blue-500 disabled:bg-gray-200 disabled:text-gray-400 text-white font-medium hover:bg-blue-600"
+          className="px-3 py-1.5 text-xs rounded-lg bg-blue-500 disabled:bg-gray-200 disabled:text-gray-400 text-white font-medium hover:bg-blue-600 flex items-center justify-center gap-1.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
         >
+          {isSubmitting && <Loader2 size={12} className="animate-spin" />}
           {initial ? "Guardar cambios" : "Crear mesociclo"}
         </button>
       </div>

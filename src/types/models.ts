@@ -13,7 +13,7 @@ export interface AuthUser {
 }
 
 // ----------------------------------------------------------------------------
-// Fases estrictas de un Mesociclo (según requerimiento)
+// Fases estrictas de un Mesociclo
 // ----------------------------------------------------------------------------
 export type MesocyclePhase =
   | "Preparación General"
@@ -38,7 +38,7 @@ export const VOLUME_LEVELS: VolumeLevel[] = ["Bajo", "Medio", "Alto"];
 // ----------------------------------------------------------------------------
 export interface DailyBlock {
   id: string;
-  mesocyclyId: string;
+  mesocycleId: string;
   date: string; // ISO "yyyy-MM-dd"
   sessionType: string; // Ej: "Fuerza", "Técnico", "Táctico", "Recuperación"
   intensity: number; // Escala 1-10
@@ -47,12 +47,11 @@ export interface DailyBlock {
   notesHtml: string; 
   createdAt: string;
   updatedAt: string;
-  //ejercicios anachi
-  exercises?: {id:string, name: string, reps:String, weight:string}[];
+  exercises?: {id:string, name: string, sets?: string, reps:string, weight:string, groupId?:string, videoUrl?: string}[];
 }
 
 // ----------------------------------------------------------------------------
-// Día (contenedor de N bloques) — parte de la semana CALCULADA, no persistida
+// Día (contenedor de N bloques)
 // ----------------------------------------------------------------------------
 export interface DayPlan {
   date: string; // ISO "yyyy-MM-dd"
@@ -62,7 +61,6 @@ export interface DayPlan {
 
 // ----------------------------------------------------------------------------
 // Semana — SIEMPRE calculada en runtime a partir de las fechas del Mesociclo.
-// No se persiste como entidad propia en la base de datos.
 // ----------------------------------------------------------------------------
 export interface Week {
   weekNumber: number; // 1, 2, 3...
@@ -82,11 +80,8 @@ export interface Mesocycle {
   startDate: string; // ISO
   endDate: string; // ISO
   order: number; // posición para drag-and-drop
-  // Los bloques diarios reales se guardan en un mapa plano (ver DailyBlocksMap)
-  // y se "hidratan" contra las semanas calculadas mediante el hook useMesocycleWeeks.
 }
 
-// Mapa plano fecha -> bloques, para no duplicar persistencia de semanas/días
 export type DailyBlocksMap = Record<string /* yyyy-MM-dd */, DailyBlock[]>;
 
 // ----------------------------------------------------------------------------
@@ -96,9 +91,9 @@ export interface Macrocycle {
   id: string;
   athleteId: string;
   name: string;
-  startDate: string; // ISO, fecha libre elegida por el coach
-  endDate: string; // ISO, fecha libre elegida por el coach
-  createdAt: string; // ISO — permite ordenar el historial (más reciente primero)
+  startDate: string; // ISO
+  endDate: string; // ISO
+  createdAt: string; 
   mesocycles: Mesocycle[];
 }
 
@@ -113,15 +108,11 @@ export interface Athlete {
   email: string;
   coachId: string;
   avatarUrl?: string;
-  // Relación 1:N — un atleta acumula TODO su historial de macrociclos a lo
-  // largo de los años (temporadas, recuperaciones de lesión, etc.) sin perder
-  // el pasado al armar uno nuevo.
   sport: string;
   phone?: string;
   macrocycles: Macrocycle[];
 }
 
-/** Nombre completo listo para mostrar en listados y encabezados */
 export function athleteFullName(athlete: Pick<Athlete, "firstName" | "lastName">): string {
   return `${athlete.firstName} ${athlete.lastName}`.trim();
 }
@@ -131,10 +122,11 @@ export interface Coach {
   name: string;
   email: string;
   athleteIds: string[];
+  isApproved?: boolean;
 }
 
 // ============================================================================
-// MÓDULO 2: Planificación del Club (independiente de la planificación individual)
+// MÓDULO 2: Planificación del Club (independiente)
 // ============================================================================
 export type ClubSport = "Vóley" | "Beach Vóley";
 
@@ -142,7 +134,7 @@ export interface Team {
   id: string;
   coachId: string;
   sport: ClubSport;
-  category: string; // Ej: "Sub-16 Femenino", "Primera División"
+  category: string; 
 }
 
 export interface ClubSession {
@@ -154,4 +146,29 @@ export interface ClubSession {
   volume: VolumeLevel;
   durationMinutes: number;
   notesHtml: string;
+}
+
+export interface TemplateDay {
+  dayNumber: number; 
+  sessionType: string;
+  exercises: any[]; 
+  notesHtml: string;
+}
+
+export interface RoutineTemplate {
+  id: string;
+  coachId: string;
+  name: string;
+  daysCount: number;
+  days: TemplateDay[];
+  createdAt: string;
+}
+
+export interface MonthlyRoutine {
+  id: string;
+  athleteId: string;
+  coachId: string;
+  monthName: string; 
+  days: TemplateDay[];
+  createdAt: string;
 }

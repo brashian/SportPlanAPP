@@ -1,65 +1,76 @@
-import React from "react";
-import { LogOut } from "lucide-react"; // Importamos el ícono
-import { auth } from '../../firebase';
-import { signOut } from 'firebase/auth';
+import React, { useState } from "react";
+import { Menu, X, LogOut, Dumbbell } from "lucide-react";
+import { signOut } from "firebase/auth";
+import { auth } from "../../firebase";
 
-interface AthleteLayoutProps {
+interface Props {
   athleteName: string;
-  avatarUrl?: string;
   children: React.ReactNode;
 }
 
-/**
- * AthleteLayout
- * ----------------------------------------------------------------------------
- * UI simplificada para el rol Atleta: sin Sidebar, solo un Topbar limpio.
- * El atleta accede a una vista única de solo lectura (su propia planificación).
- */
-export default function AthleteLayout({ athleteName, avatarUrl, children }: AthleteLayoutProps) {
-  
-  // Función para cerrar sesión
-  const handleLogout = async () => {
-    try {
-      await signOut(auth);
-    } catch (error) {
-      console.error("Error al cerrar sesión:", error);
-    }
-  };
+export default function AthleteLayout({ athleteName, children }: Props) {
+  const [isOpen, setIsOpen] = useState(false);
+
+  const Logo = () => (
+    <div className="flex items-center gap-2 font-black text-xl tracking-tight">
+      <Dumbbell className="text-blue-500" /> SportPlan
+    </div>
+  );
 
   return (
-    <div className="min-h-screen bg-surface">
-      <header className="border-b border-gray-100 bg-white px-6 py-4 flex items-center justify-between shadow-sm">
-        <p className="text-sm font-bold text-blue-600">Mi Planificación</p>
-        
-        <div className="flex items-center gap-4">
-          {/* Info del Atleta */}
-          <div className="flex items-center gap-2">
-            <span className="text-sm font-medium text-gray-700">{athleteName}</span>
-            <div className="h-8 w-8 rounded-full bg-blue-100 overflow-hidden flex items-center justify-center text-xs font-bold text-blue-600">
-              {avatarUrl ? (
-                <img src={avatarUrl} alt={athleteName} className="h-full w-full object-cover" />
-              ) : (
-                athleteName.charAt(0).toUpperCase()
-              )}
-            </div>
-          </div>
+    <div className="flex flex-col md:flex-row min-h-screen bg-slate-50 font-sans">
+      {/* Navbar Móvil */}
+      <div className="md:hidden bg-slate-900 text-white p-4 flex justify-between items-center shadow-md fixed top-0 left-0 w-full z-50 h-16">
+        <Logo />
+        <button
+          onClick={() => setIsOpen(!isOpen)}
+          className="p-1 hover:bg-slate-800 rounded-lg transition-colors"
+        >
+          {isOpen ? <X size={24} /> : <Menu size={24} />}
+        </button>
+      </div>
 
-          {/* Línea divisoria */}
-          <div className="h-6 w-px bg-gray-200"></div>
-
-          {/* Botón de Cerrar Sesión */}
-          <button 
-            onClick={handleLogout}
-            className="flex items-center gap-1.5 text-sm font-bold text-red-500 hover:text-red-700 transition-colors"
-            title="Cerrar Sesión"
-          >
-            <LogOut size={16} />
-            <span className="hidden sm:inline">Salir</span>
-          </button>
+      {/* Menú Lateral */}
+      <div
+        className={`
+          ${isOpen ? "fixed inset-0 top-16 bg-slate-900 flex flex-col z-40" : "hidden"} 
+          md:relative md:top-0 md:flex md:flex-col w-full md:w-72 md:bg-slate-900 text-white shrink-0 shadow-xl transition-all
+        `}
+      >
+        <div className="p-6 hidden md:block border-b border-slate-800">
+          <Logo />
+          <p className="text-sm font-medium text-slate-400 mt-4 truncate">
+            Atleta: <span className="font-bold text-white">{athleteName}</span>
+          </p>
         </div>
-      </header>
 
-      <main className="p-6">{children}</main>
+        <nav className="flex-1 px-4 py-6 overflow-y-auto">
+          {/* Acá podrías meter links a futuro si el atleta tiene más pantallas */}
+        </nav>
+
+        <div className="p-4 border-t border-slate-800 flex flex-col gap-4">
+          <button
+            onClick={() => signOut(auth)}
+            className="flex items-center gap-3 px-4 py-3.5 w-full text-left text-red-400 hover:bg-red-500/10 hover:text-red-300 rounded-xl transition-all font-bold"
+          >
+            <LogOut size={20} /> Cerrar Sesión
+          </button>
+          
+          <div className="text-center pt-2 pb-2">
+            <p className="text-[10px] text-slate-500 font-medium tracking-widest uppercase">
+              SportPlan V2.0
+            </p>
+            <p className="text-xs font-bold text-slate-400 tracking-wider">
+              Plataforma de Rendimiento
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* Contenido Principal (Acá adentro va el AthleteView) */}
+      <div className="flex-1 overflow-auto bg-slate-50 relative z-10 pt-16 md:pt-0">
+        {children}
+      </div>
     </div>
   );
 }
