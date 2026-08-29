@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from "react";
-import { Plus, Pencil, Loader2 } from "lucide-react";
+import { Plus, Pencil, Loader2, AlertCircle } from "lucide-react";
 import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
 import type { DailyBlock, Macrocycle, Mesocycle, MesocyclePhase } from "../../types/models";
@@ -128,7 +128,60 @@ export default function IndividualPlanningView({
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 bg-[var(--ink-950)]">
+      {/* Overrides de react-datepicker: la librería trae CSS propio con clases
+          globales, no pensado para temas oscuros. Este bloque es el único lugar
+          donde tocamos esas clases; si algo del popup se ve claro en el futuro,
+          es una clase de la librería que falta cubrir acá. */}
+      <style>{`
+        .react-datepicker {
+          font-family: inherit;
+          background-color: var(--ink-900);
+          border: 1px solid var(--line-800);
+          border-radius: 1rem;
+          overflow: hidden;
+        }
+        .react-datepicker__header {
+          background-color: var(--ink-850);
+          border-bottom: 1px solid var(--line-800);
+        }
+        .react-datepicker__current-month,
+        .react-datepicker__day-name {
+          color: var(--mist-100);
+        }
+        .react-datepicker__day {
+          color: var(--mist-300);
+        }
+        .react-datepicker__day:hover {
+          background-color: var(--ink-800);
+          color: var(--mist-100);
+        }
+        .react-datepicker__day--selected,
+        .react-datepicker__day--keyboard-selected {
+          background-color: var(--signal-500);
+          color: var(--ink-950);
+          font-weight: 700;
+        }
+        .react-datepicker__day--outside-month {
+          color: var(--mist-500);
+          opacity: 0.5;
+        }
+        .react-datepicker__day--disabled {
+          color: var(--mist-500);
+          opacity: 0.3;
+        }
+        .react-datepicker__triangle::before,
+        .react-datepicker__triangle::after {
+          border-bottom-color: var(--ink-850) !important;
+        }
+        .react-datepicker__navigation-icon::before {
+          border-color: var(--mist-300);
+        }
+        .react-datepicker__input-container input {
+          width: 100%;
+        }
+      `}</style>
+
       {/* ---------------------------------------------------------------- */}
       {/* Datos del Macrociclo (editable in-place)                         */}
       {/* ---------------------------------------------------------------- */}
@@ -142,16 +195,16 @@ export default function IndividualPlanningView({
           onCancel={() => setEditingMacro(false)}
         />
       ) : (
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between bg-[var(--ink-900)] border border-[var(--line-800)] rounded-2xl p-5">
           <div>
-            <h2 className="text-lg font-semibold text-gray-900">{macrocycle.name}</h2>
-            <p className="text-xs text-gray-500">
-              {macrocycle.startDate} → {macrocycle.endDate}
+            <h2 className="font-display font-bold text-xl text-[var(--mist-100)] uppercase tracking-wide">{macrocycle.name}</h2>
+            <p className="text-xs text-[var(--mist-500)] font-medium mt-1">
+              {macrocycle.startDate.split("-").reverse().join("/")} → {macrocycle.endDate.split("-").reverse().join("/")}
             </p>
           </div>
           <button
             onClick={() => setEditingMacro(true)}
-            className="flex items-center gap-1 text-sm text-blue-500 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 rounded-md px-1"
+            className="flex items-center gap-1.5 text-sm font-bold text-[var(--signal-500)] hover:text-[var(--signal-600)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--signal-500)] rounded-md px-2 py-1 transition-colors"
           >
             <Pencil size={14} /> Editar macrociclo
           </button>
@@ -164,13 +217,13 @@ export default function IndividualPlanningView({
         {/* -------------------------------------------------------------- */}
         <div>
           <div className="flex items-center justify-between mb-3">
-            <h3 className="text-sm font-semibold text-gray-700">Mesociclos</h3>
+            <h3 className="text-xs font-black text-[var(--mist-500)] uppercase tracking-widest">Mesociclos</h3>
             <button
               onClick={() => {
                 setEditingMesoId(null);
                 setShowMesoForm(true);
               }}
-              className="flex items-center gap-1 text-xs text-white bg-blue-500 hover:bg-blue-600 px-2.5 py-1.5 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+              className="flex items-center gap-1 text-xs font-bold text-[var(--ink-950)] bg-[var(--signal-500)] hover:bg-[var(--signal-600)] px-2.5 py-1.5 rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--signal-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--ink-950)]"
             >
               <Plus size={14} /> Nuevo
             </button>
@@ -214,15 +267,15 @@ export default function IndividualPlanningView({
         {/* -------------------------------------------------------------- */}
         <div>
           {!activeMesocycle ? (
-            <p className="text-sm text-gray-400 italic">
+            <p className="text-sm text-[var(--mist-500)] italic">
               Seleccioná o creá un mesociclo para ver su planificación semanal.
             </p>
           ) : (
             <>
               <div className="mb-3">
-                <h3 className="text-sm font-semibold text-gray-700">
+                <h3 className="text-sm font-bold text-[var(--mist-100)]">
                   {activeMesocycle.name}{" "}
-                  <span className="text-xs font-normal text-gray-400">
+                  <span className="text-xs font-normal text-[var(--mist-500)]">
                     · {activeMesocycle.phase}
                   </span>
                 </h3>
@@ -232,6 +285,7 @@ export default function IndividualPlanningView({
                 <div className="mb-3">
                   <DayBlockEditor
                     date={editingDate}
+                    mesocycleId={activeMesocycle.id}
                     initialBlock={editingBlock}
                     onCancel={() => {
                       setEditingDate(null);
@@ -284,6 +338,17 @@ function MacrocycleForm({
   const [startDate, setStartDate] = useState<Date | null>(parseLocalDate(initial?.startDate));
   const [endDate, setEndDate] = useState<Date | null>(parseLocalDate(initial?.endDate));
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [dateWasReset, setDateWasReset] = useState(false);
+
+  // Si el nuevo inicio queda después del fin ya cargado, el rango deja de
+  // tener sentido: limpiamos el fin en vez de dejarlo guardar en silencio.
+  const handleStartDateChange = (date: Date | null) => {
+    setStartDate(date);
+    if (date && endDate && endDate < date) {
+      setEndDate(null);
+      setDateWasReset(true);
+    }
+  };
 
   const canSubmit = name.trim() && startDate && endDate && !isSubmitting;
 
@@ -303,52 +368,57 @@ function MacrocycleForm({
           setIsSubmitting(false);
         }
       }}
-      className="rounded-xl border border-blue-100 bg-white p-4 space-y-3 shadow-card"
+      className="rounded-2xl border border-[var(--line-800)] bg-[var(--ink-900)] p-5 space-y-4"
     >
-      <h3 className="text-sm font-semibold text-gray-700">
+      <h3 className="text-sm font-display font-bold text-[var(--mist-100)] uppercase tracking-wide">
         {initial ? "Editar Macrociclo" : "Nuevo Macrociclo"}
       </h3>
       <div>
-        <label htmlFor="macro-form-name" className="sr-only">Nombre del macrociclo</label>
+        <label htmlFor="macro-form-name" className="block text-xs font-bold text-[var(--mist-500)] uppercase tracking-wider mb-2">Nombre del macrociclo</label>
         <input
           id="macro-form-name"
           value={name}
           onChange={(e) => setName(e.target.value)}
           placeholder="Ej: Temporada 2026"
-          className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none"
+          className="w-full rounded-lg border border-[var(--line-800)] bg-[var(--ink-800)] text-[var(--mist-100)] font-semibold px-3 py-2.5 text-sm focus:border-[var(--signal-500)] focus:ring-2 focus:ring-[var(--signal-500)]/20 outline-none transition-all placeholder:text-[var(--mist-500)] placeholder:font-normal"
         />
       </div>
       <div className="grid grid-cols-2 gap-3">
         <div>
-          <label htmlFor="macro-form-start" className="text-xs text-gray-500">Inicio</label>
+          <label htmlFor="macro-form-start" className="block text-xs font-bold text-[var(--mist-500)] uppercase tracking-wider mb-2">Inicio</label>
           <DatePicker
             id="macro-form-start"
             selected={startDate}
-            onChange={setStartDate}
+            onChange={handleStartDateChange}
             dateFormat="dd/MM/yyyy"
-            className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-blue-500 outline-none"
+            className="w-full rounded-lg border border-[var(--line-800)] bg-[var(--ink-800)] text-[var(--mist-100)] font-semibold px-3 py-2.5 text-sm focus:border-[var(--signal-500)] outline-none transition-all placeholder:text-[var(--mist-500)]"
             placeholderText="Seleccionar fecha"
           />
         </div>
         <div>
-          <label htmlFor="macro-form-end" className="text-xs text-gray-500">Fin</label>
+          <label htmlFor="macro-form-end" className="block text-xs font-bold text-[var(--mist-500)] uppercase tracking-wider mb-2">Fin</label>
           <DatePicker
             id="macro-form-end"
             selected={endDate}
-            onChange={setEndDate}
+            onChange={(date: Date | null) => { setEndDate(date); setDateWasReset(false); }}
             dateFormat="dd/MM/yyyy"
             minDate={startDate ?? undefined}
-            className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-blue-500 outline-none"
+            className="w-full rounded-lg border border-[var(--line-800)] bg-[var(--ink-800)] text-[var(--mist-100)] font-semibold px-3 py-2.5 text-sm focus:border-[var(--signal-500)] outline-none transition-all placeholder:text-[var(--mist-500)]"
             placeholderText="Seleccionar fecha"
           />
         </div>
       </div>
-      <div className="flex justify-end gap-2">
+      {dateWasReset && (
+        <p className="flex items-center gap-1.5 text-xs font-semibold text-amber-400">
+          <AlertCircle size={13} /> El fin quedaba antes del nuevo inicio, elegí una fecha de fin de nuevo.
+        </p>
+      )}
+      <div className="flex justify-end gap-2 pt-1">
         {onCancel && (
           <button
             type="button"
             onClick={onCancel}
-            className="px-4 py-2 text-sm text-gray-500 hover:bg-gray-100 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-300"
+            className="px-4 py-2 text-sm font-semibold text-[var(--mist-300)] hover:bg-[var(--ink-800)] rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--signal-500)]"
           >
             Cancelar
           </button>
@@ -356,7 +426,7 @@ function MacrocycleForm({
         <button
           type="submit"
           disabled={!canSubmit}
-          className="rounded-lg bg-blue-500 disabled:bg-gray-200 disabled:text-gray-400 text-white text-sm font-medium px-4 py-2 hover:bg-blue-600 transition-colors flex items-center justify-center gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+          className="rounded-lg bg-[var(--signal-500)] disabled:bg-[var(--ink-800)] disabled:text-[var(--mist-500)] text-[var(--ink-950)] text-sm font-bold px-4 py-2 hover:bg-[var(--signal-600)] transition-colors flex items-center justify-center gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--signal-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--ink-900)]"
         >
           {isSubmitting && <Loader2 size={14} className="animate-spin" />}
           {initial ? "Guardar cambios" : "Crear macrociclo"}
@@ -383,6 +453,15 @@ function MesocycleForm({
   const [startDate, setStartDate] = useState<Date | null>(parseLocalDate(initial?.startDate));
   const [endDate, setEndDate] = useState<Date | null>(parseLocalDate(initial?.endDate));
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [dateWasReset, setDateWasReset] = useState(false);
+
+  const handleStartDateChange = (date: Date | null) => {
+    setStartDate(date);
+    if (date && endDate && endDate < date) {
+      setEndDate(null);
+      setDateWasReset(true);
+    }
+  };
 
   const canSubmit = name.trim() && startDate && endDate && !isSubmitting;
 
@@ -403,9 +482,9 @@ function MesocycleForm({
           setIsSubmitting(false);
         }
       }}
-      className="rounded-xl border border-blue-100 bg-white p-3 space-y-2 mb-3 shadow-card"
+      className="rounded-2xl border border-[var(--line-800)] bg-[var(--ink-900)] p-4 space-y-3 mb-3"
     >
-      <p className="text-xs font-semibold text-gray-500">
+      <p className="text-xs font-black text-[var(--mist-500)] uppercase tracking-widest">
         {initial ? "Editar mesociclo" : "Nuevo mesociclo"}
       </p>
       <div>
@@ -415,7 +494,7 @@ function MesocycleForm({
           value={name}
           onChange={(e) => setName(e.target.value)}
           placeholder="Ej: Base General 1"
-          className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-blue-500 outline-none"
+          className="w-full rounded-lg border border-[var(--line-800)] bg-[var(--ink-800)] text-[var(--mist-100)] font-semibold px-3 py-2.5 text-sm focus:border-[var(--signal-500)] focus:ring-2 focus:ring-[var(--signal-500)]/20 outline-none transition-all placeholder:text-[var(--mist-500)] placeholder:font-normal"
         />
       </div>
       <div>
@@ -424,7 +503,7 @@ function MesocycleForm({
           id="meso-form-phase"
           value={phase}
           onChange={(e) => setPhase(e.target.value as MesocyclePhase)}
-          className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-blue-500 outline-none"
+          className="w-full rounded-lg border border-[var(--line-800)] bg-[var(--ink-800)] text-[var(--mist-100)] font-semibold px-3 py-2.5 text-sm focus:border-[var(--signal-500)] outline-none transition-all cursor-pointer"
         >
           {MESOCYCLE_PHASES.map((p) => (
             <option key={p} value={p}>
@@ -439,10 +518,10 @@ function MesocycleForm({
           <DatePicker
             id="meso-form-start"
             selected={startDate}
-            onChange={setStartDate}
+            onChange={handleStartDateChange}
             dateFormat="dd/MM/yyyy"
             placeholderText="Inicio"
-            className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm outline-none"
+            className="w-full rounded-lg border border-[var(--line-800)] bg-[var(--ink-800)] text-[var(--mist-100)] font-semibold px-3 py-2.5 text-sm focus:border-[var(--signal-500)] outline-none transition-all placeholder:text-[var(--mist-500)]"
           />
         </div>
         <div>
@@ -450,20 +529,25 @@ function MesocycleForm({
           <DatePicker
             id="meso-form-end"
             selected={endDate}
-            onChange={setEndDate}
+            onChange={(date: Date | null) => { setEndDate(date); setDateWasReset(false); }}
             dateFormat="dd/MM/yyyy"
             minDate={startDate ?? undefined}
             placeholderText="Fin"
-            className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm outline-none"
+            className="w-full rounded-lg border border-[var(--line-800)] bg-[var(--ink-800)] text-[var(--mist-100)] font-semibold px-3 py-2.5 text-sm focus:border-[var(--signal-500)] outline-none transition-all placeholder:text-[var(--mist-500)]"
           />
         </div>
       </div>
+      {dateWasReset && (
+        <p className="flex items-center gap-1.5 text-xs font-semibold text-amber-400">
+          <AlertCircle size={13} /> El fin quedaba antes del nuevo inicio, elegí una fecha de fin de nuevo.
+        </p>
+      )}
       <div className="flex justify-end gap-2">
         {onCancel && (
           <button
             type="button"
             onClick={onCancel}
-            className="px-3 py-1.5 text-xs text-gray-500 hover:bg-gray-100 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-300"
+            className="px-3 py-1.5 text-xs font-semibold text-[var(--mist-300)] hover:bg-[var(--ink-800)] rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--signal-500)]"
           >
             Cancelar
           </button>
@@ -471,7 +555,7 @@ function MesocycleForm({
         <button
           type="submit"
           disabled={!canSubmit}
-          className="px-3 py-1.5 text-xs rounded-lg bg-blue-500 disabled:bg-gray-200 disabled:text-gray-400 text-white font-medium hover:bg-blue-600 flex items-center justify-center gap-1.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+          className="px-3 py-1.5 text-xs rounded-lg bg-[var(--signal-500)] disabled:bg-[var(--ink-800)] disabled:text-[var(--mist-500)] text-[var(--ink-950)] font-bold hover:bg-[var(--signal-600)] transition-colors flex items-center justify-center gap-1.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--signal-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--ink-900)]"
         >
           {isSubmitting && <Loader2 size={12} className="animate-spin" />}
           {initial ? "Guardar cambios" : "Crear mesociclo"}

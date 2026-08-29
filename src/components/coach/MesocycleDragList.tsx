@@ -18,7 +18,6 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import { GripVertical, Pencil } from "lucide-react";
 import type { Mesocycle } from "../../types/models";
-import { formatWeekRange } from "../../utils/dateUtils";
 import { parseISO, format } from "date-fns";
 
 interface MesocycleDragListProps {
@@ -57,27 +56,34 @@ function SortableMesocycleItem({
     <div
       ref={setNodeRef}
       style={style}
-      className={`flex items-center gap-3 rounded-xl border px-4 py-3 mb-2 cursor-pointer transition-colors ${
+      className={`relative flex items-center gap-3 rounded-xl border px-4 py-3 mb-2 cursor-pointer transition-colors motion-reduce:transition-none ${
         isActive
-          ? "bg-blue-100/60 border-blue-300"
-          : "bg-white border-gray-200 hover:border-blue-200"
+          ? "bg-[var(--ink-800)] border-[var(--line-800)]"
+          : "bg-[var(--ink-900)] border-[var(--line-800)] hover:border-[var(--mist-500)]/40"
       }`}
       onClick={onSelect}
     >
+      {/* Carril activo, mismo motivo visual del sidebar principal */}
+      <span
+        className={`absolute left-0 top-1/2 -translate-y-1/2 w-1 rounded-full bg-[var(--signal-500)] transition-all duration-200 motion-reduce:transition-none ${
+          isActive ? "h-6 opacity-100" : "h-0 opacity-0"
+        }`}
+      />
+
       {/* Handle de arrastre: separado del click de selección */}
       <button
         {...attributes}
         {...listeners}
         onClick={(e) => e.stopPropagation()}
-        className="text-gray-400 hover:text-blue-500 cursor-grab active:cursor-grabbing"
-        aria-label="Reordenar mesociclo"
+        className="text-[var(--mist-500)] hover:text-[var(--signal-500)] cursor-grab active:cursor-grabbing focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--signal-500)] rounded"
+        aria-label={`Reordenar mesociclo ${mesocycle.name}`}
       >
         <GripVertical size={18} />
       </button>
 
       <div className="flex-1 min-w-0">
-        <p className="text-sm font-medium text-gray-900 truncate">{mesocycle.name}</p>
-        <p className="text-xs text-gray-500">
+        <p className="text-sm font-bold text-[var(--mist-100)] truncate">{mesocycle.name}</p>
+        <p className="text-xs text-[var(--mist-500)] font-medium">
           {mesocycle.phase} · {format(parseISO(mesocycle.startDate), "d MMM")} -{" "}
           {format(parseISO(mesocycle.endDate), "d MMM yyyy")}
         </p>
@@ -88,13 +94,13 @@ function SortableMesocycleItem({
           e.stopPropagation();
           onEdit();
         }}
-        className="text-gray-400 hover:text-blue-500 shrink-0"
-        aria-label="Editar mesociclo"
+        className="text-[var(--mist-500)] hover:text-[var(--signal-500)] shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--signal-500)] rounded p-1"
+        aria-label={`Editar mesociclo ${mesocycle.name}`}
       >
         <Pencil size={14} />
       </button>
 
-      {isActive && <span className="h-2 w-2 rounded-full bg-blue-500 shrink-0" />}
+      {isActive && <span className="h-2 w-2 rounded-full bg-[var(--signal-500)] shrink-0" />}
     </div>
   );
 }
@@ -125,6 +131,14 @@ export default function MesocycleDragList({
     }));
 
     onReorder(reordered);
+  }
+
+  if (ordered.length === 0) {
+    return (
+      <p className="text-sm text-[var(--mist-500)] italic px-1">
+        Todavía no hay mesociclos en este macrociclo.
+      </p>
+    );
   }
 
   return (

@@ -6,7 +6,8 @@ import type { Athlete, DailyBlock, Mesocycle, MesocyclePhase, Macrocycle, Routin
 import ReactQuill from 'react-quill';
 import 'react-quill/dist/quill.snow.css';
 import MonthlyRoutineManager from "./MonthlyRoutineManager";
-import { Trash2, Edit3, AlertTriangle, X, ChevronLeft, Plus, Dumbbell, Calendar, Target, Loader2, CheckCircle2, XCircle } from "lucide-react";
+import { Trash2, Edit3, AlertTriangle, X, ChevronLeft, Plus, Dumbbell, Calendar, Target, Loader2, CheckCircle2, XCircle, SearchX } from "lucide-react";
+import ModalShell from "../shared/ModalShell";
 
 interface AthleteDetailViewProps {
   athletes: Athlete[];
@@ -46,115 +47,25 @@ const getWeeksInRange = (start: string, end: string) => {
   return weeks;
 };
 
+// Colores por grupo de bloque (superserie/circuito), adaptados a fondo oscuro:
+// fondo del color al 10% + borde sólido, para que se distingan sin "quemar" la vista.
 const BLOCK_COLORS = [
-  "bg-blue-100 border-l-4 border-blue-500",
-  "bg-emerald-100 border-l-4 border-emerald-500",
-  "bg-purple-100 border-l-4 border-purple-500",
-  "bg-amber-100 border-l-4 border-amber-500",
-  "bg-rose-100 border-l-4 border-rose-500",
-  "bg-cyan-100 border-l-4 border-cyan-500",
+  "bg-blue-500/10 border-l-4 border-blue-500",
+  "bg-emerald-500/10 border-l-4 border-emerald-500",
+  "bg-purple-500/10 border-l-4 border-purple-500",
+  "bg-amber-500/10 border-l-4 border-amber-500",
+  "bg-rose-500/10 border-l-4 border-rose-500",
+  "bg-cyan-500/10 border-l-4 border-cyan-500",
 ];
 
 const getBlockColor = (groupId?: string) => {
-  if (!groupId || groupId.trim() === "") return "bg-white border-l-4 border-transparent";
+  if (!groupId || groupId.trim() === "") return "bg-[var(--ink-800)] border-l-4 border-transparent";
   let hash = 0;
   for (let i = 0; i < groupId.length; i++) hash += groupId.toUpperCase().charCodeAt(i);
   return BLOCK_COLORS[hash % BLOCK_COLORS.length];
 };
 
-// ── Accesibilidad de modales: focus trap + Escape + scroll lock, reutilizable ──
-
-const FOCUSABLE_SELECTOR =
-  'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
-
-function useModalA11y(onRequestClose: () => void) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const previouslyFocused = useRef<HTMLElement | null>(null);
-
-  useEffect(() => {
-    previouslyFocused.current = document.activeElement as HTMLElement;
-    const originalOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-
-    const focusablesIn = () =>
-      containerRef.current ? Array.from(containerRef.current.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)) : [];
-
-    focusablesIn()[0]?.focus();
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        onRequestClose();
-        return;
-      }
-      if (e.key !== 'Tab') return;
-      const focusables = focusablesIn();
-      if (focusables.length === 0) return;
-      const first = focusables[0];
-      const last = focusables[focusables.length - 1];
-      if (e.shiftKey && document.activeElement === first) {
-        e.preventDefault();
-        last.focus();
-      } else if (!e.shiftKey && document.activeElement === last) {
-        e.preventDefault();
-        first.focus();
-      }
-    };
-
-    document.addEventListener('keydown', handleKeyDown);
-    return () => {
-      document.body.style.overflow = originalOverflow;
-      document.removeEventListener('keydown', handleKeyDown);
-      previouslyFocused.current?.focus();
-    };
-  }, [onRequestClose]);
-
-  return containerRef;
-}
-
-interface ModalShellProps {
-  onClose: () => void;
-  labelledBy: string;
-  overlayClassName?: string;
-  panelClassName?: string;
-  zIndexClassName?: string;
-  children: (requestClose: () => void) => React.ReactNode;
-}
-
-// Envoltorio único para TODOS los overlays del archivo: da focus trap, cierre con
-// Escape, click afuera, bloqueo de scroll del body y una animación de cierre suave,
-// en vez de reimplementar (o de no implementar) esto en cada uno de los 8 modales.
-function ModalShell({ onClose, labelledBy, overlayClassName, panelClassName, zIndexClassName = "z-50", children }: ModalShellProps) {
-  const [isClosing, setIsClosing] = useState(false);
-  const requestClose = useCallback(() => {
-    setIsClosing(true);
-    window.setTimeout(onClose, 180);
-  }, [onClose]);
-  const containerRef = useModalA11y(requestClose);
-
-  return (
-    <div
-      className={`fixed inset-0 ${overlayClassName || 'bg-slate-900/60 backdrop-blur-sm'} flex items-center justify-center p-4 ${zIndexClassName} transition-opacity duration-150 ${
-        isClosing ? 'opacity-0' : 'opacity-100 animate-in fade-in duration-200'
-      }`}
-      onMouseDown={(e) => { if (e.target === e.currentTarget) requestClose(); }}
-    >
-      <div
-        ref={containerRef}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={labelledBy}
-        className={`bg-white rounded-3xl shadow-2xl w-full transition-all duration-150 ${panelClassName || 'max-w-md p-8'} ${
-          isClosing ? 'opacity-0 scale-95' : 'opacity-100 animate-in zoom-in-95 duration-300'
-        }`}
-      >
-        {children(requestClose)}
-      </div>
-    </div>
-  );
-}
-
-// ── Toast simple, no bloqueante (reemplaza los alert() del original) ────────
+// ── Toast simple, no bloqueante ──────────────────────────────────────────────
 
 interface ToastState {
   type: 'success' | 'error';
@@ -174,8 +85,8 @@ function Toast({ toast, onDismiss }: { toast: ToastState | null; onDismiss: () =
     <div
       role="status"
       aria-live="polite"
-      className={`fixed bottom-4 sm:bottom-6 left-1/2 -translate-x-1/2 z-[200] flex items-center gap-2.5 px-5 py-3.5 rounded-2xl shadow-2xl font-bold text-sm text-white animate-in slide-in-from-bottom-4 fade-in duration-300 ${
-        toast.type === 'success' ? 'bg-emerald-600' : 'bg-red-600'
+      className={`fixed bottom-4 sm:bottom-6 left-1/2 -translate-x-1/2 z-[200] flex items-center gap-2.5 px-5 py-3.5 rounded-2xl shadow-2xl font-bold text-sm text-[var(--ink-950)] animate-in slide-in-from-bottom-4 fade-in duration-300 motion-reduce:animate-none ${
+        toast.type === 'success' ? 'bg-[var(--pulse-500)]' : 'bg-red-400'
       }`}
     >
       {toast.type === 'success' ? <CheckCircle2 size={18} /> : <XCircle size={18} />}
@@ -515,8 +426,33 @@ export default function AthleteDetailView({
     fetchMacrocycles();
   }, [athleteId]);
 
+  // ── Estado "atleta no encontrado" (antes quedaba en spinner infinito) ──────
+  // Heurística: si ya llegó la lista de atletas (length > 0) y no está este id,
+  // es que no existe / fue borrado — no que "todavía está cargando".
+  // Si tu lista de atletas tiene su propio flag de carga (ej. `athletesLoading`
+  // en el componente padre), pasalo como prop acá y reemplazá esta condición
+  // por `!athletesLoading && !athlete` para que sea 100% correcto también
+  // cuando un coach legítimamente tiene 0 atletas.
+  if (!athlete && athletes.length > 0) {
+    return (
+      <div className="p-12 max-w-lg mx-auto text-center flex flex-col items-center">
+        <div className="w-16 h-16 rounded-2xl bg-[var(--ink-800)] flex items-center justify-center mb-5">
+          <SearchX size={28} className="text-[var(--mist-500)]" />
+        </div>
+        <h1 className="font-display font-bold text-2xl text-[var(--mist-100)] uppercase tracking-wide">Atleta no encontrado</h1>
+        <p className="text-[var(--mist-500)] mt-2 font-medium">Puede que el perfil haya sido eliminado o el enlace ya no sea válido.</p>
+        <Link
+          to="/athletes"
+          className="mt-6 inline-flex items-center gap-2 bg-[var(--signal-500)] hover:bg-[var(--signal-600)] text-[var(--ink-950)] px-6 py-3 rounded-xl font-display font-bold uppercase tracking-wide transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--signal-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--ink-950)]"
+        >
+          <ChevronLeft size={18} /> Volver a Mis Atletas
+        </Link>
+      </div>
+    );
+  }
+
   if (!athlete) return (
-    <div className="p-12 text-center text-blue-600 font-bold animate-pulse flex flex-col items-center">
+    <div className="p-12 text-center text-[var(--signal-500)] font-bold animate-pulse motion-reduce:animate-none flex flex-col items-center">
       <Target size={40} className="mb-4 opacity-50" />
       <p>Cargando perfil del atleta...</p>
     </div>
@@ -526,32 +462,32 @@ export default function AthleteDetailView({
   const allMesosForDropdown = athlete.macrocycles?.flatMap(m => (m.mesocycles || []).map(meso => ({ ...meso, macroName: m.name }))) || [];
 
   return (
-    <div className="p-4 sm:p-6 lg:p-8 max-w-6xl mx-auto space-y-8 animate-in fade-in duration-500 font-sans">
+    <div className="p-4 sm:p-6 lg:p-8 max-w-6xl mx-auto space-y-8 animate-in fade-in duration-500">
 
       <div>
-        <Link to="/athletes" className="inline-flex items-center gap-2 text-sm font-bold text-slate-500 hover:text-blue-600 transition-colors bg-white px-4 py-2.5 rounded-xl border border-slate-200 shadow-sm active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400">
+        <Link to="/athletes" className="inline-flex items-center gap-2 text-sm font-bold text-[var(--mist-300)] hover:text-[var(--signal-500)] transition-colors bg-[var(--ink-900)] px-4 py-2.5 rounded-xl border border-[var(--line-800)] active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--signal-500)]">
           <ChevronLeft size={16} /> Volver a Mis Atletas
         </Link>
       </div>
 
-      <div className="bg-white p-6 sm:p-8 rounded-3xl border border-slate-200 shadow-sm flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
+      <div className="bg-[var(--ink-900)] p-6 sm:p-8 rounded-3xl border border-[var(--line-800)] flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
         <div className="flex items-center gap-5">
-          <div className="w-16 h-16 sm:w-20 sm:h-20 shrink-0 bg-gradient-to-br from-blue-600 to-blue-400 text-white rounded-2xl flex items-center justify-center text-2xl sm:text-3xl font-black shadow-md shadow-blue-500/30">
+          <div className="w-16 h-16 sm:w-20 sm:h-20 shrink-0 bg-gradient-to-br from-[var(--signal-500)] to-[var(--signal-600)] text-[var(--ink-950)] rounded-2xl flex items-center justify-center text-2xl sm:text-3xl font-display font-bold">
             {fullName?.charAt(0).toUpperCase()}
           </div>
           <div>
-            <h1 className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight leading-tight">{fullName}</h1>
-            <span className="inline-block mt-2 px-3 py-1 bg-slate-100 text-slate-600 text-xs font-black uppercase tracking-wider rounded-lg">
+            <h1 className="text-2xl sm:text-3xl font-display font-bold text-[var(--mist-100)] tracking-tight leading-tight">{fullName}</h1>
+            <span className="inline-block mt-2 px-3 py-1 bg-[var(--ink-800)] text-[var(--mist-300)] text-xs font-black uppercase tracking-wider rounded-lg">
               {athlete.sport || "Deporte no especificado"}
             </span>
           </div>
         </div>
 
         <div className="flex w-full md:w-auto gap-3">
-          <button onClick={handleOpenEditAthlete} className="flex-1 md:flex-none px-5 py-3.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition-all active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400">
+          <button onClick={handleOpenEditAthlete} className="flex-1 md:flex-none px-5 py-3.5 bg-[var(--ink-800)] hover:bg-[var(--line-800)] text-[var(--mist-100)] rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition-all active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--signal-500)]">
             <Edit3 size={18} /> Editar Perfil
           </button>
-          <button onClick={() => setAthleteToDelete(true)} className="flex-1 md:flex-none px-5 py-3.5 bg-red-50 hover:bg-red-100 text-red-600 rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition-all active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400">
+          <button onClick={() => setAthleteToDelete(true)} className="flex-1 md:flex-none px-5 py-3.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition-all active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400">
             <Trash2 size={18} /> Eliminar
           </button>
         </div>
@@ -560,12 +496,12 @@ export default function AthleteDetailView({
       <div className="mt-8">
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
           <div>
-            <h2 className="text-xl sm:text-2xl font-black text-slate-800 tracking-tight flex items-center gap-2">
-              <Calendar className="text-blue-600" size={24} /> Planificación de Temporada
+            <h2 className="text-xl sm:text-2xl font-display font-bold text-[var(--mist-100)] uppercase tracking-wide flex items-center gap-2">
+              <Calendar className="text-[var(--signal-500)]" size={24} /> Planificación de Temporada
             </h2>
-            <p className="text-sm font-medium text-slate-500 mt-1">Estructurá los macrociclos y bloques diarios del atleta.</p>
+            <p className="text-sm font-medium text-[var(--mist-500)] mt-1">Estructurá los macrociclos y bloques diarios del atleta.</p>
           </div>
-          <button onClick={() => setIsMacroModalOpen(true)} className="w-full sm:w-auto bg-slate-900 hover:bg-black text-white px-6 py-3.5 rounded-2xl text-sm font-bold transition-all shadow-lg active:scale-95 flex items-center justify-center gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400">
+          <button onClick={() => setIsMacroModalOpen(true)} className="w-full sm:w-auto bg-[var(--signal-500)] hover:bg-[var(--signal-600)] text-[var(--ink-950)] px-6 py-3.5 rounded-2xl text-sm font-display font-bold uppercase tracking-wide transition-all active:scale-95 flex items-center justify-center gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--signal-500)]">
             <Plus size={18} /> Nuevo Macrociclo
           </button>
         </div>
@@ -573,64 +509,64 @@ export default function AthleteDetailView({
         {isLoadingMacros ? (
           <div className="space-y-4" aria-live="polite" aria-busy="true">
             {[0, 1].map(i => (
-              <div key={i} className="border border-slate-200 bg-white rounded-3xl shadow-sm p-6 animate-pulse">
-                <div className="h-5 w-48 bg-slate-200 rounded mb-3" />
-                <div className="h-3 w-64 bg-slate-100 rounded" />
+              <div key={i} className="border border-[var(--line-800)] bg-[var(--ink-900)] rounded-3xl p-6 animate-pulse motion-reduce:animate-none">
+                <div className="h-5 w-48 bg-[var(--ink-800)] rounded mb-3" />
+                <div className="h-3 w-64 bg-[var(--ink-800)] rounded" />
               </div>
             ))}
           </div>
         ) : !athlete.macrocycles || athlete.macrocycles.length === 0 ? (
-          <div className="p-12 text-center border-2 border-dashed border-slate-200 rounded-3xl bg-slate-50/50 flex flex-col items-center">
-            <Calendar size={48} className="text-slate-300 mb-4" />
-            <p className="text-lg font-bold text-slate-700">Aún no hay planificación creada.</p>
-            <p className="text-sm text-slate-500 mt-1 max-w-sm">Organizá el año de tu atleta agregando el primer macrociclo.</p>
+          <div className="p-12 text-center border-2 border-dashed border-[var(--line-800)] rounded-3xl bg-[var(--ink-900)]/50 flex flex-col items-center">
+            <Calendar size={48} className="text-[var(--mist-500)] mb-4" />
+            <p className="text-lg font-bold text-[var(--mist-100)]">Aún no hay planificación creada.</p>
+            <p className="text-sm text-[var(--mist-500)] mt-1 max-w-sm">Organizá el año de tu atleta agregando el primer macrociclo.</p>
           </div>
         ) : (
           <div className="space-y-6">
             {athlete.macrocycles.map((macro) => (
-              <div key={macro.id} className="border border-slate-200 bg-white rounded-3xl shadow-sm overflow-hidden transition-all">
-                <div className="bg-slate-50/50 p-5 sm:p-6 border-b border-slate-200 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+              <div key={macro.id} className="border border-[var(--line-800)] bg-[var(--ink-900)] rounded-3xl overflow-hidden transition-all">
+                <div className="bg-[var(--ink-850)] p-5 sm:p-6 border-b border-[var(--line-800)] flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
                   <div>
                     <div className="flex items-center gap-3">
-                      <h3 className="text-xl font-black text-slate-800 tracking-tight">{macro.name}</h3>
-                      <button onClick={() => setMacroToDelete(macro.id)} aria-label={`Eliminar macrociclo ${macro.name}`} title="Eliminar Macrociclo" className="text-slate-400 hover:text-red-500 hover:bg-red-50 p-2 rounded-xl transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400">
+                      <h3 className="text-xl font-display font-bold text-[var(--mist-100)] tracking-tight">{macro.name}</h3>
+                      <button onClick={() => setMacroToDelete(macro.id)} aria-label={`Eliminar macrociclo ${macro.name}`} title="Eliminar Macrociclo" className="text-[var(--mist-500)] hover:text-red-400 hover:bg-red-500/10 p-2 rounded-xl transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400">
                         <Trash2 size={16} />
                       </button>
                     </div>
-                    <p className="text-sm font-medium text-slate-500 mt-1">Del {macro.startDate.split('-').reverse().join('/')} al {macro.endDate.split('-').reverse().join('/')}</p>
+                    <p className="text-sm font-medium text-[var(--mist-500)] mt-1">Del {macro.startDate.split('-').reverse().join('/')} al {macro.endDate.split('-').reverse().join('/')}</p>
                   </div>
-                  <button onClick={() => { setActiveMacroId(macro.id); setIsMesoModalOpen(true); }} className="w-full sm:w-auto text-blue-700 font-bold bg-blue-50 hover:bg-blue-100 px-5 py-2.5 rounded-xl text-sm transition-colors active:scale-95 flex items-center justify-center gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400">
+                  <button onClick={() => { setActiveMacroId(macro.id); setIsMesoModalOpen(true); }} className="w-full sm:w-auto text-[var(--signal-500)] font-bold bg-[var(--signal-500)]/10 hover:bg-[var(--signal-500)]/20 px-5 py-2.5 rounded-xl text-sm transition-colors active:scale-95 flex items-center justify-center gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--signal-500)]">
                     <Plus size={16} /> Agregar Mesociclo
                   </button>
                 </div>
 
                 <div className="p-4 sm:p-6">
                   {!macro.mesocycles || macro.mesocycles.length === 0 ? (
-                    <p className="text-sm text-slate-400 italic text-center py-6">No hay ciclos menores creados todavía.</p>
+                    <p className="text-sm text-[var(--mist-500)] italic text-center py-6">No hay ciclos menores creados todavía.</p>
                   ) : (
                     <div className="space-y-4">
                       {macro.mesocycles.map((meso) => (
-                        <div key={meso.id} className="border border-slate-200 rounded-2xl p-4 sm:p-5 bg-white shadow-sm hover:shadow-md transition-shadow">
+                        <div key={meso.id} className="border border-[var(--line-800)] rounded-2xl p-4 sm:p-5 bg-[var(--ink-850)] hover:border-[var(--mist-500)]/40 transition-colors">
                           <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4">
                             <div>
                               <div className="flex items-center gap-3">
-                                <h4 className="font-black text-lg text-slate-800">{meso.name}</h4>
-                                <span className="text-[10px] font-black uppercase tracking-wider bg-slate-100 text-slate-600 px-2 py-1 rounded-md">{meso.phase}</span>
-                                <button onClick={() => setMesoToDelete({ macroId: macro.id, mesoId: meso.id })} aria-label={`Eliminar mesociclo ${meso.name}`} title="Eliminar Mesociclo" className="text-slate-400 hover:text-red-500 hover:bg-red-50 p-1.5 rounded-lg transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400">
+                                <h4 className="font-display font-bold text-lg text-[var(--mist-100)]">{meso.name}</h4>
+                                <span className="text-[10px] font-black uppercase tracking-wider bg-[var(--ink-800)] text-[var(--mist-300)] px-2 py-1 rounded-md">{meso.phase}</span>
+                                <button onClick={() => setMesoToDelete({ macroId: macro.id, mesoId: meso.id })} aria-label={`Eliminar mesociclo ${meso.name}`} title="Eliminar Mesociclo" className="text-[var(--mist-500)] hover:text-red-400 hover:bg-red-500/10 p-1.5 rounded-lg transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400">
                                   <Trash2 size={15} />
                                 </button>
                               </div>
-                              <p className="text-xs font-medium text-slate-500 mt-1">{meso.startDate.split('-').reverse().join('/')} → {meso.endDate.split('-').reverse().join('/')}</p>
+                              <p className="text-xs font-medium text-[var(--mist-500)] mt-1">{meso.startDate.split('-').reverse().join('/')} → {meso.endDate.split('-').reverse().join('/')}</p>
                             </div>
 
                             <div className="flex w-full lg:w-auto gap-2">
-                              <button onClick={() => { setImportMeso(meso); setIsImportModalOpen(true); }} className="flex-1 lg:flex-none text-center bg-emerald-50 hover:bg-emerald-100 text-emerald-700 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-colors active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400">
+                              <button onClick={() => { setImportMeso(meso); setIsImportModalOpen(true); }} className="flex-1 lg:flex-none text-center bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-colors active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400">
                                 Pegar Plantilla
                               </button>
                               <button
                                 onClick={() => handleViewBlocks(meso.id)}
                                 aria-expanded={activeViewMesoId === meso.id}
-                                className={`flex-1 lg:flex-none text-center px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-colors active:scale-95 border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 ${activeViewMesoId === meso.id ? 'bg-slate-800 text-white border-slate-800' : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'}`}
+                                className={`flex-1 lg:flex-none text-center px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-colors active:scale-95 border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--signal-500)] ${activeViewMesoId === meso.id ? 'bg-[var(--signal-500)] text-[var(--ink-950)] border-[var(--signal-500)]' : 'bg-[var(--ink-800)] border-[var(--line-800)] text-[var(--mist-100)] hover:bg-[var(--line-800)]'}`}
                               >
                                 {activeViewMesoId === meso.id ? "Ocultar Días" : "Ver Calendario"}
                               </button>
@@ -638,10 +574,10 @@ export default function AthleteDetailView({
                           </div>
 
                           {activeViewMesoId === meso.id && (
-                            <div className="mt-5 p-3 sm:p-4 bg-slate-50 rounded-2xl border border-slate-100 animate-in slide-in-from-top-2 duration-300">
+                            <div className="mt-5 p-3 sm:p-4 bg-[var(--ink-950)] rounded-2xl border border-[var(--line-800)] animate-in slide-in-from-top-2 duration-300 motion-reduce:animate-none">
                               {isLoadingBlocks ? (
                                 <div className="space-y-2 p-2" aria-live="polite" aria-busy="true">
-                                  {[0, 1, 2].map(i => <div key={i} className="h-11 bg-slate-100 rounded-xl animate-pulse" />)}
+                                  {[0, 1, 2].map(i => <div key={i} className="h-11 bg-[var(--ink-800)] rounded-xl animate-pulse motion-reduce:animate-none" />)}
                                 </div>
                               ) : (
                                 <div className="space-y-3">
@@ -650,31 +586,31 @@ export default function AthleteDetailView({
                                     const isExpanded = expandedWeek === weekKey;
 
                                     return (
-                                      <div key={weekKey} className="border border-slate-200 bg-white rounded-xl shadow-sm overflow-hidden transition-all">
-                                        <button onClick={() => setExpandedWeek(isExpanded ? null : weekKey)} aria-expanded={isExpanded} className="w-full flex justify-between items-center p-4 hover:bg-slate-50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 focus-visible:ring-inset">
-                                          <span className="font-black text-slate-800 text-sm md:text-base">{week.label}</span>
-                                          <span className="text-xs font-bold text-slate-400 bg-slate-100 px-2.5 py-1 rounded-lg">Del {week.days[0].date.slice(-5).replace('-', '/')} al {week.days[6].date.slice(-5).replace('-', '/')}</span>
+                                      <div key={weekKey} className="border border-[var(--line-800)] bg-[var(--ink-900)] rounded-xl overflow-hidden transition-all">
+                                        <button onClick={() => setExpandedWeek(isExpanded ? null : weekKey)} aria-expanded={isExpanded} className="w-full flex justify-between items-center p-4 hover:bg-[var(--ink-850)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--signal-500)] focus-visible:ring-inset">
+                                          <span className="font-display font-bold text-[var(--mist-100)] text-sm md:text-base">{week.label}</span>
+                                          <span className="text-xs font-bold text-[var(--mist-500)] bg-[var(--ink-800)] px-2.5 py-1 rounded-lg">Del {week.days[0].date.slice(-5).replace('-', '/')} al {week.days[6].date.slice(-5).replace('-', '/')}</span>
                                         </button>
 
                                         {isExpanded && (
-                                          <div className="border-t border-slate-100 divide-y divide-slate-100 bg-slate-50/50">
+                                          <div className="border-t border-[var(--line-800)] divide-y divide-[var(--line-800)] bg-[var(--ink-950)]">
                                             {week.days.map(day => {
                                               const existingBlock = blocksByMesocycle[meso.id]?.find((b: any) => b.date === day.date);
                                               const isOutside = day.date < meso.startDate || day.date > meso.endDate;
 
                                               return (
-                                                <div key={day.date} className={`flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 p-3.5 text-sm transition-colors ${isOutside ? 'bg-slate-100/50 opacity-60' : 'bg-white hover:bg-slate-50'}`}>
+                                                <div key={day.date} className={`flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 p-3.5 text-sm transition-colors ${isOutside ? 'bg-[var(--ink-900)]/40 opacity-50' : 'bg-[var(--ink-900)] hover:bg-[var(--ink-850)]'}`}>
                                                   <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-6 w-full sm:w-auto">
-                                                    <span className="font-bold w-full sm:w-28 text-slate-700 flex items-center justify-between sm:justify-start gap-2">
-                                                      {day.name} <span className="font-medium text-xs text-slate-400">{day.date.split('-').reverse().slice(0, 2).join('/')}</span>
+                                                    <span className="font-bold w-full sm:w-28 text-[var(--mist-100)] flex items-center justify-between sm:justify-start gap-2">
+                                                      {day.name} <span className="font-medium text-xs text-[var(--mist-500)]">{day.date.split('-').reverse().slice(0, 2).join('/')}</span>
                                                     </span>
                                                     {existingBlock ? (
-                                                      <span className="text-blue-600 font-black truncate bg-blue-50 px-2.5 py-0.5 rounded text-xs">{existingBlock.sessionType}</span>
+                                                      <span className="text-[var(--signal-500)] font-black truncate bg-[var(--signal-500)]/10 px-2.5 py-0.5 rounded text-xs">{existingBlock.sessionType}</span>
                                                     ) : (
-                                                      <span className="text-slate-400 italic text-xs font-medium">Descanso / Libre</span>
+                                                      <span className="text-[var(--mist-500)] italic text-xs font-medium">Descanso / Libre</span>
                                                     )}
                                                   </div>
-                                                  <button onClick={() => handleOpenBlockModal(meso.id, day.date, day.name, existingBlock)} className={`w-full sm:w-auto text-center px-4 py-2 rounded-lg text-xs font-bold transition-all active:scale-95 border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 ${existingBlock ? 'bg-white border-slate-200 text-slate-700 hover:bg-slate-100' : 'bg-blue-50 border-blue-100 text-blue-700 hover:bg-blue-100'}`}>
+                                                  <button onClick={() => handleOpenBlockModal(meso.id, day.date, day.name, existingBlock)} className={`w-full sm:w-auto text-center px-4 py-2 rounded-lg text-xs font-bold transition-all active:scale-95 border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--signal-500)] ${existingBlock ? 'bg-[var(--ink-800)] border-[var(--line-800)] text-[var(--mist-100)] hover:bg-[var(--line-800)]' : 'bg-[var(--signal-500)]/10 border-[var(--signal-500)]/20 text-[var(--signal-500)] hover:bg-[var(--signal-500)]/20'}`}>
                                                     {existingBlock ? "Editar" : "Cargar Sesión"}
                                                   </button>
                                                 </div>
@@ -741,11 +677,11 @@ export default function AthleteDetailView({
         <ModalShell onClose={() => setIsImportModalOpen(false)} labelledBy="import-modal-title" panelClassName="max-w-md p-8 max-h-[90vh] overflow-y-auto">
           {(close) => (
             <>
-              <h2 id="import-modal-title" className="text-2xl font-black text-slate-800 mb-2 tracking-tight">Inyectar Plantilla</h2>
-              <p className="text-sm font-medium text-slate-500 mb-6">Pegá una rutina directamente al calendario de este mesociclo.</p>
+              <h2 id="import-modal-title" className="text-2xl font-display font-bold text-[var(--mist-100)] mb-2 uppercase tracking-wide">Inyectar Plantilla</h2>
+              <p className="text-sm font-medium text-[var(--mist-500)] mb-6">Pegá una rutina directamente al calendario de este mesociclo.</p>
 
               <form onSubmit={handleImportSubmit} className="space-y-5">
-                <select required value={selectedTemplate} onChange={(e) => { setSelectedTemplate(e.target.value); setDayMapping({}); }} className="w-full bg-slate-50 border border-slate-200 text-slate-800 font-bold rounded-xl p-3.5 outline-none focus:ring-4 focus:ring-blue-600/10 focus:border-blue-600 transition-all cursor-pointer">
+                <select required value={selectedTemplate} onChange={(e) => { setSelectedTemplate(e.target.value); setDayMapping({}); }} className="w-full bg-[var(--ink-800)] border border-[var(--line-800)] text-[var(--mist-100)] font-bold rounded-xl p-3.5 outline-none focus:ring-4 focus:ring-[var(--signal-500)]/15 focus:border-[var(--signal-500)] transition-all cursor-pointer">
                   <option value="">Seleccionar Rutina...</option>
                   <optgroup label="Historial del Atleta">
                     {monthlyRoutines.map(r => <option key={r.id} value={r.id}>{r.monthName}</option>)}
@@ -756,12 +692,12 @@ export default function AthleteDetailView({
                 </select>
 
                 {selectedTemplate && (
-                  <div className="bg-slate-50 p-5 rounded-2xl border border-slate-100 space-y-4">
-                    <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">Asignar a días de la semana</p>
+                  <div className="bg-[var(--ink-800)] p-5 rounded-2xl border border-[var(--line-800)] space-y-4">
+                    <p className="text-xs font-bold text-[var(--mist-500)] uppercase tracking-wider">Asignar a días de la semana</p>
                     {(templates.find(t => t.id === selectedTemplate) || monthlyRoutines.find(r => r.id === selectedTemplate))?.days.map(d => (
-                      <div key={d.dayNumber} className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-2 border-b border-slate-200 pb-3 last:border-0 last:pb-0">
-                        <label htmlFor={`day-map-${d.dayNumber}`} className="text-sm font-bold text-slate-700">Día {d.dayNumber}</label>
-                        <select id={`day-map-${d.dayNumber}`} required value={dayMapping[d.dayNumber] || ""} onChange={(e) => setDayMapping({ ...dayMapping, [d.dayNumber]: e.target.value })} className="bg-white border border-slate-200 rounded-xl p-2 text-sm font-bold text-slate-700 w-full sm:w-36 outline-none focus:ring-2 focus:ring-blue-500 transition-all">
+                      <div key={d.dayNumber} className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-2 border-b border-[var(--line-800)] pb-3 last:border-0 last:pb-0">
+                        <label htmlFor={`day-map-${d.dayNumber}`} className="text-sm font-bold text-[var(--mist-100)]">Día {d.dayNumber}</label>
+                        <select id={`day-map-${d.dayNumber}`} required value={dayMapping[d.dayNumber] || ""} onChange={(e) => setDayMapping({ ...dayMapping, [d.dayNumber]: e.target.value })} className="bg-[var(--ink-900)] border border-[var(--line-800)] rounded-xl p-2 text-sm font-bold text-[var(--mist-100)] w-full sm:w-36 outline-none focus:ring-2 focus:ring-[var(--signal-500)] transition-all">
                           <option value="">Elegir...</option><option value="1">Lunes</option><option value="2">Martes</option><option value="3">Miércoles</option><option value="4">Jueves</option><option value="5">Viernes</option><option value="6">Sábado</option><option value="0">Domingo</option>
                         </select>
                       </div>
@@ -770,8 +706,8 @@ export default function AthleteDetailView({
                 )}
 
                 <div className="flex gap-3 pt-4">
-                  <button type="button" onClick={close} className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-3.5 rounded-xl transition-all active:scale-95">Cancelar</button>
-                  <button type="submit" disabled={isSubmitting || !selectedTemplate} className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-black py-3.5 rounded-xl disabled:bg-blue-300 transition-all shadow-lg shadow-blue-600/30 active:scale-95 flex items-center justify-center gap-2">
+                  <button type="button" onClick={close} className="flex-1 bg-[var(--ink-800)] hover:bg-[var(--line-800)] text-[var(--mist-100)] font-bold py-3.5 rounded-xl transition-all active:scale-95">Cancelar</button>
+                  <button type="submit" disabled={isSubmitting || !selectedTemplate} className="flex-1 bg-[var(--signal-500)] hover:bg-[var(--signal-600)] text-[var(--ink-950)] font-display font-bold uppercase tracking-wide py-3.5 rounded-xl disabled:opacity-40 transition-all active:scale-95 flex items-center justify-center gap-2">
                     {isSubmitting && <Loader2 size={16} className="animate-spin" />} Inyectar Días
                   </button>
                 </div>
@@ -785,13 +721,13 @@ export default function AthleteDetailView({
         <ModalShell onClose={() => { setGlobalImportRoutine(null); setGlobalTargetMesoId(""); }} labelledBy="global-import-modal-title" panelClassName="max-w-md p-8 max-h-[90vh] overflow-y-auto">
           {(close) => (
             <>
-              <h2 id="global-import-modal-title" className="text-2xl font-black text-slate-800 mb-2 tracking-tight">Inyectar Rutina PDF</h2>
-              <p className="text-sm font-medium text-slate-500 mb-6">Elegí el destino en el calendario para volcar esta rutina mensual.</p>
+              <h2 id="global-import-modal-title" className="text-2xl font-display font-bold text-[var(--mist-100)] mb-2 uppercase tracking-wide">Inyectar Rutina PDF</h2>
+              <p className="text-sm font-medium text-[var(--mist-500)] mb-6">Elegí el destino en el calendario para volcar esta rutina mensual.</p>
 
               <form onSubmit={handleGlobalImportSubmit} className="space-y-5">
                 <div>
-                  <label htmlFor="target-meso" className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Mesociclo Destino</label>
-                  <select id="target-meso" required value={globalTargetMesoId} onChange={(e) => { setGlobalTargetMesoId(e.target.value); setDayMapping({}); }} className="w-full bg-slate-50 border border-slate-200 text-slate-800 font-bold rounded-xl p-3.5 outline-none focus:ring-4 focus:ring-blue-600/10 focus:border-blue-600 transition-all cursor-pointer">
+                  <label htmlFor="target-meso" className="block text-xs font-bold text-[var(--mist-500)] uppercase tracking-wider mb-2">Mesociclo Destino</label>
+                  <select id="target-meso" required value={globalTargetMesoId} onChange={(e) => { setGlobalTargetMesoId(e.target.value); setDayMapping({}); }} className="w-full bg-[var(--ink-800)] border border-[var(--line-800)] text-[var(--mist-100)] font-bold rounded-xl p-3.5 outline-none focus:ring-4 focus:ring-[var(--signal-500)]/15 focus:border-[var(--signal-500)] transition-all cursor-pointer">
                     <option value="">Seleccionar Mesociclo...</option>
                     {allMesosForDropdown.map(meso => (
                       <option key={meso.id} value={meso.id}>
@@ -802,12 +738,12 @@ export default function AthleteDetailView({
                 </div>
 
                 {globalTargetMesoId && (
-                  <div className="bg-slate-50 p-5 rounded-2xl border border-slate-100 space-y-4">
-                    <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">Asignar a días</p>
+                  <div className="bg-[var(--ink-800)] p-5 rounded-2xl border border-[var(--line-800)] space-y-4">
+                    <p className="text-xs font-bold text-[var(--mist-500)] uppercase tracking-wider">Asignar a días</p>
                     {globalImportRoutine.days.map(d => (
-                      <div key={d.dayNumber} className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-2 border-b border-slate-200 pb-3 last:border-0 last:pb-0">
-                        <label htmlFor={`gday-map-${d.dayNumber}`} className="text-xs font-bold text-slate-700 truncate w-32" title={d.sessionType}>Día {d.dayNumber}: {d.sessionType}</label>
-                        <select id={`gday-map-${d.dayNumber}`} required value={dayMapping[d.dayNumber] || ""} onChange={(e) => setDayMapping({ ...dayMapping, [d.dayNumber]: e.target.value })} className="bg-white border border-slate-200 rounded-xl p-2 text-sm font-bold text-slate-700 w-full sm:w-36 outline-none focus:ring-2 focus:ring-blue-500 transition-all">
+                      <div key={d.dayNumber} className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-2 border-b border-[var(--line-800)] pb-3 last:border-0 last:pb-0">
+                        <label htmlFor={`gday-map-${d.dayNumber}`} className="text-xs font-bold text-[var(--mist-100)] truncate w-32" title={d.sessionType}>Día {d.dayNumber}: {d.sessionType}</label>
+                        <select id={`gday-map-${d.dayNumber}`} required value={dayMapping[d.dayNumber] || ""} onChange={(e) => setDayMapping({ ...dayMapping, [d.dayNumber]: e.target.value })} className="bg-[var(--ink-900)] border border-[var(--line-800)] rounded-xl p-2 text-sm font-bold text-[var(--mist-100)] w-full sm:w-36 outline-none focus:ring-2 focus:ring-[var(--signal-500)] transition-all">
                           <option value="">Día...</option><option value="1">Lunes</option><option value="2">Martes</option><option value="3">Miércoles</option><option value="4">Jueves</option><option value="5">Viernes</option><option value="6">Sábado</option><option value="0">Domingo</option>
                         </select>
                       </div>
@@ -816,8 +752,8 @@ export default function AthleteDetailView({
                 )}
 
                 <div className="flex gap-3 pt-4">
-                  <button type="button" onClick={close} className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-3.5 rounded-xl transition-all active:scale-95">Cancelar</button>
-                  <button type="submit" disabled={isSubmitting || !globalTargetMesoId} className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-black py-3.5 rounded-xl disabled:bg-blue-300 transition-all shadow-lg shadow-blue-600/30 active:scale-95 flex items-center justify-center gap-2">
+                  <button type="button" onClick={close} className="flex-1 bg-[var(--ink-800)] hover:bg-[var(--line-800)] text-[var(--mist-100)] font-bold py-3.5 rounded-xl transition-all active:scale-95">Cancelar</button>
+                  <button type="submit" disabled={isSubmitting || !globalTargetMesoId} className="flex-1 bg-[var(--signal-500)] hover:bg-[var(--signal-600)] text-[var(--ink-950)] font-display font-bold uppercase tracking-wide py-3.5 rounded-xl disabled:opacity-40 transition-all active:scale-95 flex items-center justify-center gap-2">
                     {isSubmitting && <Loader2 size={16} className="animate-spin" />} Finalizar Inyección
                   </button>
                 </div>
@@ -831,25 +767,25 @@ export default function AthleteDetailView({
         <ModalShell onClose={() => setIsMacroModalOpen(false)} labelledBy="macro-modal-title">
           {(close) => (
             <>
-              <h2 id="macro-modal-title" className="text-2xl font-black text-slate-800 mb-6 tracking-tight">Nuevo Macrociclo</h2>
+              <h2 id="macro-modal-title" className="text-2xl font-display font-bold text-[var(--mist-100)] mb-6 uppercase tracking-wide">Nuevo Macrociclo</h2>
               <form onSubmit={handleMacroSubmit} className="space-y-5">
                 <div>
-                  <label htmlFor="macro-name" className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Nombre del Bloque</label>
-                  <input id="macro-name" type="text" required placeholder="Ej: Torneo Apertura" value={macroFormData.name} onChange={(e) => setMacroFormData({ ...macroFormData, name: e.target.value })} className="w-full bg-slate-50 border border-slate-200 text-slate-800 font-bold rounded-xl p-3.5 focus:ring-4 focus:ring-blue-600/10 focus:border-blue-600 outline-none transition-all" />
+                  <label htmlFor="macro-name" className="block text-xs font-bold text-[var(--mist-500)] uppercase tracking-wider mb-2">Nombre del Bloque</label>
+                  <input id="macro-name" type="text" required placeholder="Ej: Torneo Apertura" value={macroFormData.name} onChange={(e) => setMacroFormData({ ...macroFormData, name: e.target.value })} className="w-full bg-[var(--ink-800)] border border-[var(--line-800)] text-[var(--mist-100)] font-bold rounded-xl p-3.5 focus:ring-4 focus:ring-[var(--signal-500)]/15 focus:border-[var(--signal-500)] outline-none transition-all placeholder:text-[var(--mist-500)]" />
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label htmlFor="macro-start" className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Inicio</label>
-                    <input id="macro-start" type="date" required value={macroFormData.startDate} onChange={(e) => setMacroFormData({ ...macroFormData, startDate: e.target.value })} className="w-full bg-slate-50 border border-slate-200 text-slate-800 font-bold rounded-xl p-3.5 focus:ring-4 focus:ring-blue-600/10 focus:border-blue-600 outline-none transition-all" />
+                    <label htmlFor="macro-start" className="block text-xs font-bold text-[var(--mist-500)] uppercase tracking-wider mb-2">Inicio</label>
+                    <input id="macro-start" type="date" required value={macroFormData.startDate} onChange={(e) => setMacroFormData({ ...macroFormData, startDate: e.target.value })} className="w-full bg-[var(--ink-800)] border border-[var(--line-800)] text-[var(--mist-100)] font-bold rounded-xl p-3.5 focus:ring-4 focus:ring-[var(--signal-500)]/15 focus:border-[var(--signal-500)] outline-none transition-all" />
                   </div>
                   <div>
-                    <label htmlFor="macro-end" className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Fin</label>
-                    <input id="macro-end" type="date" required value={macroFormData.endDate} onChange={(e) => setMacroFormData({ ...macroFormData, endDate: e.target.value })} className="w-full bg-slate-50 border border-slate-200 text-slate-800 font-bold rounded-xl p-3.5 focus:ring-4 focus:ring-blue-600/10 focus:border-blue-600 outline-none transition-all" />
+                    <label htmlFor="macro-end" className="block text-xs font-bold text-[var(--mist-500)] uppercase tracking-wider mb-2">Fin</label>
+                    <input id="macro-end" type="date" required value={macroFormData.endDate} onChange={(e) => setMacroFormData({ ...macroFormData, endDate: e.target.value })} className="w-full bg-[var(--ink-800)] border border-[var(--line-800)] text-[var(--mist-100)] font-bold rounded-xl p-3.5 focus:ring-4 focus:ring-[var(--signal-500)]/15 focus:border-[var(--signal-500)] outline-none transition-all" />
                   </div>
                 </div>
                 <div className="flex gap-3 pt-4">
-                  <button type="button" onClick={close} className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-3.5 rounded-xl transition-all active:scale-95">Cancelar</button>
-                  <button type="submit" disabled={isSubmitting} className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-black py-3.5 rounded-xl disabled:bg-blue-300 transition-all shadow-lg shadow-blue-600/30 active:scale-95 flex items-center justify-center gap-2">
+                  <button type="button" onClick={close} className="flex-1 bg-[var(--ink-800)] hover:bg-[var(--line-800)] text-[var(--mist-100)] font-bold py-3.5 rounded-xl transition-all active:scale-95">Cancelar</button>
+                  <button type="submit" disabled={isSubmitting} className="flex-1 bg-[var(--signal-500)] hover:bg-[var(--signal-600)] text-[var(--ink-950)] font-display font-bold uppercase tracking-wide py-3.5 rounded-xl disabled:opacity-40 transition-all active:scale-95 flex items-center justify-center gap-2">
                     {isSubmitting && <Loader2 size={16} className="animate-spin" />} Guardar
                   </button>
                 </div>
@@ -863,15 +799,15 @@ export default function AthleteDetailView({
         <ModalShell onClose={() => { setIsMesoModalOpen(false); setActiveMacroId(null); }} labelledBy="meso-modal-title">
           {(close) => (
             <>
-              <h2 id="meso-modal-title" className="text-2xl font-black text-slate-800 mb-6 tracking-tight">Agregar Mesociclo</h2>
+              <h2 id="meso-modal-title" className="text-2xl font-display font-bold text-[var(--mist-100)] mb-6 uppercase tracking-wide">Agregar Mesociclo</h2>
               <form onSubmit={handleMesoSubmit} className="space-y-5">
                 <div>
-                  <label htmlFor="meso-name" className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Nombre del Ciclo</label>
-                  <input id="meso-name" type="text" required placeholder="Ej: Fuerza Base I" value={mesoFormData.name} onChange={(e) => setMesoFormData({ ...mesoFormData, name: e.target.value })} className="w-full bg-slate-50 border border-slate-200 text-slate-800 font-bold rounded-xl p-3.5 focus:ring-4 focus:ring-blue-600/10 focus:border-blue-600 outline-none transition-all" />
+                  <label htmlFor="meso-name" className="block text-xs font-bold text-[var(--mist-500)] uppercase tracking-wider mb-2">Nombre del Ciclo</label>
+                  <input id="meso-name" type="text" required placeholder="Ej: Fuerza Base I" value={mesoFormData.name} onChange={(e) => setMesoFormData({ ...mesoFormData, name: e.target.value })} className="w-full bg-[var(--ink-800)] border border-[var(--line-800)] text-[var(--mist-100)] font-bold rounded-xl p-3.5 focus:ring-4 focus:ring-[var(--signal-500)]/15 focus:border-[var(--signal-500)] outline-none transition-all placeholder:text-[var(--mist-500)]" />
                 </div>
                 <div>
-                  <label htmlFor="meso-phase" className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Fase del Entrenamiento</label>
-                  <select id="meso-phase" required value={mesoFormData.phase} onChange={(e) => setMesoFormData({ ...mesoFormData, phase: e.target.value as MesocyclePhase })} className="w-full bg-slate-50 border border-slate-200 text-slate-800 font-bold rounded-xl p-3.5 focus:ring-4 focus:ring-blue-600/10 focus:border-blue-600 outline-none transition-all cursor-pointer">
+                  <label htmlFor="meso-phase" className="block text-xs font-bold text-[var(--mist-500)] uppercase tracking-wider mb-2">Fase del Entrenamiento</label>
+                  <select id="meso-phase" required value={mesoFormData.phase} onChange={(e) => setMesoFormData({ ...mesoFormData, phase: e.target.value as MesocyclePhase })} className="w-full bg-[var(--ink-800)] border border-[var(--line-800)] text-[var(--mist-100)] font-bold rounded-xl p-3.5 focus:ring-4 focus:ring-[var(--signal-500)]/15 focus:border-[var(--signal-500)] outline-none transition-all cursor-pointer">
                     <option value="Preparación General">Preparación General</option>
                     <option value="Preparación Específica">Preparación Específica</option>
                     <option value="Pre-Competitiva">Pre-Competitiva</option>
@@ -881,17 +817,17 @@ export default function AthleteDetailView({
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label htmlFor="meso-start" className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Inicio</label>
-                    <input id="meso-start" type="date" required value={mesoFormData.startDate} onChange={(e) => setMesoFormData({ ...mesoFormData, startDate: e.target.value })} className="w-full bg-slate-50 border border-slate-200 text-slate-800 font-bold rounded-xl p-3.5 focus:ring-4 focus:ring-blue-600/10 focus:border-blue-600 outline-none transition-all" />
+                    <label htmlFor="meso-start" className="block text-xs font-bold text-[var(--mist-500)] uppercase tracking-wider mb-2">Inicio</label>
+                    <input id="meso-start" type="date" required value={mesoFormData.startDate} onChange={(e) => setMesoFormData({ ...mesoFormData, startDate: e.target.value })} className="w-full bg-[var(--ink-800)] border border-[var(--line-800)] text-[var(--mist-100)] font-bold rounded-xl p-3.5 focus:ring-4 focus:ring-[var(--signal-500)]/15 focus:border-[var(--signal-500)] outline-none transition-all" />
                   </div>
                   <div>
-                    <label htmlFor="meso-end" className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Fin</label>
-                    <input id="meso-end" type="date" required value={mesoFormData.endDate} onChange={(e) => setMesoFormData({ ...mesoFormData, endDate: e.target.value })} className="w-full bg-slate-50 border border-slate-200 text-slate-800 font-bold rounded-xl p-3.5 focus:ring-4 focus:ring-blue-600/10 focus:border-blue-600 outline-none transition-all" />
+                    <label htmlFor="meso-end" className="block text-xs font-bold text-[var(--mist-500)] uppercase tracking-wider mb-2">Fin</label>
+                    <input id="meso-end" type="date" required value={mesoFormData.endDate} onChange={(e) => setMesoFormData({ ...mesoFormData, endDate: e.target.value })} className="w-full bg-[var(--ink-800)] border border-[var(--line-800)] text-[var(--mist-100)] font-bold rounded-xl p-3.5 focus:ring-4 focus:ring-[var(--signal-500)]/15 focus:border-[var(--signal-500)] outline-none transition-all" />
                   </div>
                 </div>
                 <div className="flex gap-3 pt-4">
-                  <button type="button" onClick={close} className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-3.5 rounded-xl transition-all active:scale-95">Cancelar</button>
-                  <button type="submit" disabled={isSubmitting} className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-black py-3.5 rounded-xl disabled:bg-blue-300 transition-all shadow-lg shadow-blue-600/30 active:scale-95 flex items-center justify-center gap-2">
+                  <button type="button" onClick={close} className="flex-1 bg-[var(--ink-800)] hover:bg-[var(--line-800)] text-[var(--mist-100)] font-bold py-3.5 rounded-xl transition-all active:scale-95">Cancelar</button>
+                  <button type="submit" disabled={isSubmitting} className="flex-1 bg-[var(--signal-500)] hover:bg-[var(--signal-600)] text-[var(--ink-950)] font-display font-bold uppercase tracking-wide py-3.5 rounded-xl disabled:opacity-40 transition-all active:scale-95 flex items-center justify-center gap-2">
                     {isSubmitting && <Loader2 size={16} className="animate-spin" />} Guardar
                   </button>
                 </div>
@@ -906,58 +842,58 @@ export default function AthleteDetailView({
         <ModalShell
           onClose={() => setIsBlockModalOpen(false)}
           labelledBy="block-modal-title"
-          overlayClassName="bg-slate-900/80 backdrop-blur-sm"
+          overlayClassName="bg-[var(--ink-950)]/90 backdrop-blur-sm motion-reduce:backdrop-blur-none"
           panelClassName="max-w-5xl flex flex-col max-h-[95vh] overflow-hidden p-0"
         >
           {(close) => (
             <>
-              <div className="p-5 sm:p-6 bg-slate-900 text-white flex justify-between items-center shrink-0">
+              <div className="p-5 sm:p-6 bg-[var(--ink-950)] text-[var(--mist-100)] flex justify-between items-center shrink-0 border-b border-[var(--line-800)]">
                 <div className="flex items-center gap-4">
-                  <div className="p-3 bg-white/10 rounded-2xl hidden sm:block">
-                    <Calendar size={24} className="text-blue-400" />
+                  <div className="p-3 bg-[var(--signal-500)]/10 rounded-2xl hidden sm:block">
+                    <Calendar size={24} className="text-[var(--signal-500)]" />
                   </div>
                   <div>
-                    <h2 id="block-modal-title" className="font-black text-lg sm:text-2xl tracking-tight">{activeBlockContext.name} {activeBlockContext.date.split('-').reverse().join('/')}</h2>
-                    <p className="text-xs sm:text-sm text-slate-400 font-medium mt-0.5">Diseñá el entrenamiento exacto para este día.</p>
+                    <h2 id="block-modal-title" className="font-display font-bold text-lg sm:text-2xl uppercase tracking-wide">{activeBlockContext.name} {activeBlockContext.date.split('-').reverse().join('/')}</h2>
+                    <p className="text-xs sm:text-sm text-[var(--mist-500)] font-medium mt-0.5">Diseñá el entrenamiento exacto para este día.</p>
                   </div>
                 </div>
-                <button onClick={close} aria-label="Cerrar editor de sesión" className="p-2 bg-white/10 hover:bg-white/20 rounded-full transition-colors active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-300"><X size={20} /></button>
+                <button onClick={close} aria-label="Cerrar editor de sesión" className="p-2 bg-[var(--ink-800)] hover:bg-[var(--line-800)] rounded-full transition-colors active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--signal-500)]"><X size={20} /></button>
               </div>
 
-              <div className="p-4 sm:p-8 overflow-y-auto bg-slate-50/50 flex-1 space-y-8 custom-scrollbar">
+              <div className="p-4 sm:p-8 overflow-y-auto bg-[var(--ink-950)] flex-1 space-y-8 custom-scrollbar">
                 <form id="blockForm" onSubmit={handleBlockSubmit} className="space-y-8">
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 bg-[var(--ink-900)] p-6 rounded-2xl border border-[var(--line-800)]">
                     <div>
-                      <label htmlFor="session-type" className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Enfoque de la sesión</label>
-                      <input id="session-type" type="text" required value={blockFormData.sessionType} onChange={(e) => setBlockFormData({ ...blockFormData, sessionType: e.target.value })} className="w-full bg-slate-50 border border-slate-200 text-slate-800 font-bold rounded-xl p-3.5 focus:ring-4 focus:ring-blue-600/10 focus:border-blue-600 outline-none transition-all" placeholder="Ej: Empuje y Tríceps" />
+                      <label htmlFor="session-type" className="block text-xs font-bold text-[var(--mist-500)] uppercase tracking-wider mb-2">Enfoque de la sesión</label>
+                      <input id="session-type" type="text" required value={blockFormData.sessionType} onChange={(e) => setBlockFormData({ ...blockFormData, sessionType: e.target.value })} className="w-full bg-[var(--ink-800)] border border-[var(--line-800)] text-[var(--mist-100)] font-bold rounded-xl p-3.5 focus:ring-4 focus:ring-[var(--signal-500)]/15 focus:border-[var(--signal-500)] outline-none transition-all" placeholder="Ej: Empuje y Tríceps" />
                     </div>
                     <div>
-                      <label htmlFor="session-volume" className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Volumen Estimado</label>
-                      <select id="session-volume" value={blockFormData.volume} onChange={(e) => setBlockFormData({ ...blockFormData, volume: e.target.value as any })} className="w-full bg-slate-50 border border-slate-200 text-slate-800 font-bold rounded-xl p-3.5 outline-none focus:ring-4 focus:ring-blue-600/10 focus:border-blue-600 transition-all cursor-pointer">
+                      <label htmlFor="session-volume" className="block text-xs font-bold text-[var(--mist-500)] uppercase tracking-wider mb-2">Volumen Estimado</label>
+                      <select id="session-volume" value={blockFormData.volume} onChange={(e) => setBlockFormData({ ...blockFormData, volume: e.target.value as any })} className="w-full bg-[var(--ink-800)] border border-[var(--line-800)] text-[var(--mist-100)] font-bold rounded-xl p-3.5 outline-none focus:ring-4 focus:ring-[var(--signal-500)]/15 focus:border-[var(--signal-500)] transition-all cursor-pointer">
                         <option value="Bajo">Bajo</option><option value="Medio">Medio</option><option value="Alto">Alto</option>
                       </select>
                     </div>
                   </div>
 
-                  <div className="bg-white p-5 sm:p-6 rounded-2xl border border-slate-200 shadow-sm">
+                  <div className="bg-[var(--ink-900)] p-5 sm:p-6 rounded-2xl border border-[var(--line-800)]">
                     <div className="flex flex-col sm:flex-row justify-between sm:items-end gap-4 mb-6">
                       <div>
-                        <h3 className="text-lg font-black text-slate-800 flex items-center gap-2">
-                          <Dumbbell size={20} className="text-blue-500" /> Esquema de Ejercicios
+                        <h3 className="text-lg font-display font-bold text-[var(--mist-100)] uppercase tracking-wide flex items-center gap-2">
+                          <Dumbbell size={20} className="text-[var(--signal-500)]" /> Esquema de Ejercicios
                         </h3>
                       </div>
-                      <button type="button" onClick={() => setBlockFormData(prev => ({ ...prev, exercises: [...prev.exercises, { id: Date.now().toString(), name: "", sets: "", reps: "", weight: "", groupId: "", videoUrl: "" }] }))} className="w-full sm:w-auto bg-blue-50 hover:bg-blue-100 text-blue-700 font-black py-2.5 px-4 rounded-xl transition-colors text-sm flex items-center justify-center gap-2 active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400">
+                      <button type="button" onClick={() => setBlockFormData(prev => ({ ...prev, exercises: [...prev.exercises, { id: Date.now().toString(), name: "", sets: "", reps: "", weight: "", groupId: "", videoUrl: "" }] }))} className="w-full sm:w-auto bg-[var(--signal-500)]/10 hover:bg-[var(--signal-500)]/20 text-[var(--signal-500)] font-black py-2.5 px-4 rounded-xl transition-colors text-sm flex items-center justify-center gap-2 active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--signal-500)]">
                         <Plus size={16} strokeWidth={3} /> Agregar Ejercicio
                       </button>
                     </div>
 
                     {blockFormData.exercises.length === 0 ? (
-                      <div className="p-8 border-2 border-dashed border-slate-200 rounded-2xl text-center text-slate-400 text-sm font-medium">No hay ejercicios cargados para este día.</div>
+                      <div className="p-8 border-2 border-dashed border-[var(--line-800)] rounded-2xl text-center text-[var(--mist-500)] text-sm font-medium">No hay ejercicios cargados para este día.</div>
                     ) : (
                       <div className="overflow-x-auto pb-2">
                         <div className="min-w-[800px] space-y-3">
-                          <div className="flex gap-2 px-2 text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                          <div className="flex gap-2 px-2 text-[10px] font-black text-[var(--mist-500)] uppercase tracking-widest">
                             <div className="w-[30%]">Ejercicio</div>
                             <div className="w-[10%] text-center">Series</div>
                             <div className="w-[10%] text-center">Reps</div>
@@ -969,15 +905,15 @@ export default function AthleteDetailView({
                           {blockFormData.exercises.map((ex) => {
                             const groupColor = getBlockColor(ex.groupId);
                             return (
-                              <div key={ex.id} className={`flex gap-2 mb-2 p-2 rounded-xl shadow-sm border items-center transition-all focus-within:ring-2 focus-within:ring-blue-600/20 ${groupColor === "bg-white border-l-4 border-transparent" ? "bg-slate-50 border-slate-100" : groupColor}`}>
-                                <input type="text" aria-label="Nombre del ejercicio" value={ex.name} onChange={(e) => setBlockFormData(prev => ({ ...prev, exercises: prev.exercises.map(x => x.id === ex.id ? { ...x, name: e.target.value } : x) }))} className="w-[30%] bg-white border border-slate-200 rounded-lg p-2.5 text-sm font-bold text-slate-700 focus:border-blue-500 outline-none shadow-sm" placeholder="Sentadilla" />
-                                <input type="text" aria-label="Cantidad de series" value={ex.sets || ""} onChange={(e) => setBlockFormData(prev => ({ ...prev, exercises: prev.exercises.map(x => x.id === ex.id ? { ...x, sets: e.target.value } : x) }))} className="w-[10%] text-center bg-white border border-slate-200 rounded-lg p-2.5 text-sm font-bold text-slate-700 focus:border-blue-500 outline-none shadow-sm" placeholder="4" />
-                                <input type="text" aria-label="Repeticiones" value={ex.reps} onChange={(e) => setBlockFormData(prev => ({ ...prev, exercises: prev.exercises.map(x => x.id === ex.id ? { ...x, reps: e.target.value } : x) }))} className="w-[10%] text-center bg-white border border-slate-200 rounded-lg p-2.5 text-sm font-bold text-slate-700 focus:border-blue-500 outline-none shadow-sm" placeholder="10" />
-                                <input type="text" aria-label="Carga o intensidad" value={ex.weight} onChange={(e) => setBlockFormData(prev => ({ ...prev, exercises: prev.exercises.map(x => x.id === ex.id ? { ...x, weight: e.target.value } : x) }))} className="w-[15%] bg-white border border-slate-200 rounded-lg p-2.5 text-sm font-bold text-blue-600 focus:border-blue-500 outline-none shadow-sm" placeholder="RIR 2" />
-                                <input type="url" aria-label="Link del video demostrativo" value={ex.videoUrl || ""} onChange={(e) => setBlockFormData(prev => ({ ...prev, exercises: prev.exercises.map(x => x.id === ex.id ? { ...x, videoUrl: e.target.value } : x) }))} className="w-[20%] bg-white border border-slate-200 rounded-lg p-2.5 text-sm font-medium text-slate-500 focus:border-blue-500 outline-none shadow-sm" placeholder="https://youtu.be/..." />
-                                <input type="text" aria-label="Identificador de bloque o grupo" maxLength={2} value={ex.groupId || ""} onChange={(e) => setBlockFormData(prev => ({ ...prev, exercises: prev.exercises.map(x => x.id === ex.id ? { ...x, groupId: e.target.value.toUpperCase() } : x) }))} className="w-[8%] bg-white border border-slate-200 rounded-lg p-2.5 text-sm font-black text-slate-700 text-center uppercase focus:border-blue-500 outline-none shadow-sm" placeholder="-" />
+                              <div key={ex.id} className={`flex gap-2 mb-2 p-2 rounded-xl border items-center transition-all focus-within:ring-2 focus-within:ring-[var(--signal-500)]/30 border-[var(--line-800)] ${groupColor}`}>
+                                <input type="text" aria-label="Nombre del ejercicio" value={ex.name} onChange={(e) => setBlockFormData(prev => ({ ...prev, exercises: prev.exercises.map(x => x.id === ex.id ? { ...x, name: e.target.value } : x) }))} className="w-[30%] bg-[var(--ink-900)] border border-[var(--line-800)] rounded-lg p-2.5 text-sm font-bold text-[var(--mist-100)] focus:border-[var(--signal-500)] outline-none" placeholder="Sentadilla" />
+                                <input type="text" aria-label="Cantidad de series" value={ex.sets || ""} onChange={(e) => setBlockFormData(prev => ({ ...prev, exercises: prev.exercises.map(x => x.id === ex.id ? { ...x, sets: e.target.value } : x) }))} className="w-[10%] text-center bg-[var(--ink-900)] border border-[var(--line-800)] rounded-lg p-2.5 text-sm font-bold text-[var(--mist-100)] focus:border-[var(--signal-500)] outline-none" placeholder="4" />
+                                <input type="text" aria-label="Repeticiones" value={ex.reps} onChange={(e) => setBlockFormData(prev => ({ ...prev, exercises: prev.exercises.map(x => x.id === ex.id ? { ...x, reps: e.target.value } : x) }))} className="w-[10%] text-center bg-[var(--ink-900)] border border-[var(--line-800)] rounded-lg p-2.5 text-sm font-bold text-[var(--mist-100)] focus:border-[var(--signal-500)] outline-none" placeholder="10" />
+                                <input type="text" aria-label="Carga o intensidad" value={ex.weight} onChange={(e) => setBlockFormData(prev => ({ ...prev, exercises: prev.exercises.map(x => x.id === ex.id ? { ...x, weight: e.target.value } : x) }))} className="w-[15%] bg-[var(--ink-900)] border border-[var(--line-800)] rounded-lg p-2.5 text-sm font-bold text-[var(--signal-500)] focus:border-[var(--signal-500)] outline-none" placeholder="RIR 2" />
+                                <input type="url" aria-label="Link del video demostrativo" value={ex.videoUrl || ""} onChange={(e) => setBlockFormData(prev => ({ ...prev, exercises: prev.exercises.map(x => x.id === ex.id ? { ...x, videoUrl: e.target.value } : x) }))} className="w-[20%] bg-[var(--ink-900)] border border-[var(--line-800)] rounded-lg p-2.5 text-sm font-medium text-[var(--mist-300)] focus:border-[var(--signal-500)] outline-none" placeholder="https://youtu.be/..." />
+                                <input type="text" aria-label="Identificador de bloque o grupo" maxLength={2} value={ex.groupId || ""} onChange={(e) => setBlockFormData(prev => ({ ...prev, exercises: prev.exercises.map(x => x.id === ex.id ? { ...x, groupId: e.target.value.toUpperCase() } : x) }))} className="w-[8%] bg-[var(--ink-900)] border border-[var(--line-800)] rounded-lg p-2.5 text-sm font-black text-[var(--mist-100)] text-center uppercase focus:border-[var(--signal-500)] outline-none" placeholder="-" />
                                 <div className="w-[7%] flex justify-center">
-                                  <button type="button" onClick={() => setBlockFormData(prev => ({ ...prev, exercises: prev.exercises.filter(x => x.id !== ex.id) }))} aria-label={`Eliminar ejercicio ${ex.name || 'sin nombre'}`} className="text-slate-400 hover:text-red-500 hover:bg-red-50 p-2.5 rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400"><X size={18} /></button>
+                                  <button type="button" onClick={() => setBlockFormData(prev => ({ ...prev, exercises: prev.exercises.filter(x => x.id !== ex.id) }))} aria-label={`Eliminar ejercicio ${ex.name || 'sin nombre'}`} className="text-[var(--mist-500)] hover:text-red-400 hover:bg-red-500/10 p-2.5 rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400"><X size={18} /></button>
                                 </div>
                               </div>
                             )
@@ -987,9 +923,12 @@ export default function AthleteDetailView({
                     )}
                   </div>
 
-                  <div className="bg-white p-5 sm:p-6 rounded-2xl border border-slate-200 shadow-sm">
-                    <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Notas y Observaciones</label>
-                    <div className="h-40 sm:h-48 mb-12 sm:mb-10">
+                  {/* Nota: react-quill (tema "snow") viene con estilos claros hardcodeados;
+                      se deja en un panel claro deliberado para mantener legibilidad sin
+                      tener que overridear su CSS interno a ciegas. */}
+                  <div className="bg-[var(--ink-900)] p-5 sm:p-6 rounded-2xl border border-[var(--line-800)]">
+                    <label className="block text-xs font-bold text-[var(--mist-500)] uppercase tracking-wider mb-3">Notas y Observaciones</label>
+                    <div className="h-40 sm:h-48 mb-12 sm:mb-10 bg-[var(--mist-100)] rounded-xl overflow-hidden">
                       <ReactQuill
                         key={`quill-block-${activeBlockContext?.date || 'new'}`}
                         theme="snow"
@@ -1004,9 +943,9 @@ export default function AthleteDetailView({
                 </form>
               </div>
 
-              <div className="p-4 sm:p-6 border-t border-slate-200 bg-white flex justify-end gap-3 shrink-0">
-                <button type="button" onClick={close} className="px-6 py-3.5 bg-slate-100 hover:bg-slate-200 rounded-xl font-bold text-sm text-slate-700 transition-all active:scale-95">Cancelar</button>
-                <button type="submit" form="blockForm" disabled={isSubmitting} className="px-8 py-3.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-black text-sm transition-all shadow-lg shadow-blue-600/30 active:scale-95 flex items-center justify-center gap-2">
+              <div className="p-4 sm:p-6 border-t border-[var(--line-800)] bg-[var(--ink-900)] flex justify-end gap-3 shrink-0">
+                <button type="button" onClick={close} className="px-6 py-3.5 bg-[var(--ink-800)] hover:bg-[var(--line-800)] rounded-xl font-bold text-sm text-[var(--mist-100)] transition-all active:scale-95">Cancelar</button>
+                <button type="submit" form="blockForm" disabled={isSubmitting} className="px-8 py-3.5 bg-[var(--signal-500)] hover:bg-[var(--signal-600)] text-[var(--ink-950)] rounded-xl font-display font-bold uppercase tracking-wide text-sm transition-all active:scale-95 flex items-center justify-center gap-2">
                   {isSubmitting && <Loader2 size={16} className="animate-spin" />} Guardar Sesión
                 </button>
               </div>
@@ -1019,23 +958,23 @@ export default function AthleteDetailView({
         <ModalShell onClose={() => setIsEditAthleteModalOpen(false)} labelledBy="edit-athlete-title" zIndexClassName="z-[60]">
           {(close) => (
             <>
-              <h2 id="edit-athlete-title" className="text-2xl font-black text-slate-800 mb-6 tracking-tight">Editar Perfil</h2>
+              <h2 id="edit-athlete-title" className="text-2xl font-display font-bold text-[var(--mist-100)] mb-6 uppercase tracking-wide">Editar Perfil</h2>
               <form onSubmit={handleAthleteEditSubmit} className="space-y-5">
                 <div>
-                  <label htmlFor="athlete-name" className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Nombre Completo *</label>
-                  <input id="athlete-name" required type="text" value={athleteFormData.name} onChange={(e) => setAthleteFormData({ ...athleteFormData, name: e.target.value })} className="w-full bg-slate-50 border border-slate-200 text-slate-800 font-bold rounded-xl p-3.5 focus:ring-4 focus:ring-blue-600/10 focus:border-blue-600 outline-none transition-all" />
+                  <label htmlFor="athlete-name" className="block text-xs font-bold text-[var(--mist-500)] uppercase tracking-wider mb-2">Nombre Completo *</label>
+                  <input id="athlete-name" required type="text" value={athleteFormData.name} onChange={(e) => setAthleteFormData({ ...athleteFormData, name: e.target.value })} className="w-full bg-[var(--ink-800)] border border-[var(--line-800)] text-[var(--mist-100)] font-bold rounded-xl p-3.5 focus:ring-4 focus:ring-[var(--signal-500)]/15 focus:border-[var(--signal-500)] outline-none transition-all" />
                 </div>
                 <div>
-                  <label htmlFor="athlete-sport" className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Deporte o Categoría *</label>
-                  <input id="athlete-sport" required type="text" value={athleteFormData.sport} onChange={(e) => setAthleteFormData({ ...athleteFormData, sport: e.target.value })} className="w-full bg-slate-50 border border-slate-200 text-slate-800 font-bold rounded-xl p-3.5 focus:ring-4 focus:ring-blue-600/10 focus:border-blue-600 outline-none transition-all" />
+                  <label htmlFor="athlete-sport" className="block text-xs font-bold text-[var(--mist-500)] uppercase tracking-wider mb-2">Deporte o Categoría *</label>
+                  <input id="athlete-sport" required type="text" value={athleteFormData.sport} onChange={(e) => setAthleteFormData({ ...athleteFormData, sport: e.target.value })} className="w-full bg-[var(--ink-800)] border border-[var(--line-800)] text-[var(--mist-100)] font-bold rounded-xl p-3.5 focus:ring-4 focus:ring-[var(--signal-500)]/15 focus:border-[var(--signal-500)] outline-none transition-all" />
                 </div>
                 <div>
-                  <label htmlFor="athlete-email" className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Email de acceso</label>
-                  <input id="athlete-email" type="email" value={athleteFormData.email} onChange={(e) => setAthleteFormData({ ...athleteFormData, email: e.target.value })} className="w-full bg-slate-50 border border-slate-200 text-slate-800 font-bold rounded-xl p-3.5 focus:ring-4 focus:ring-blue-600/10 focus:border-blue-600 outline-none transition-all" placeholder="atleta@correo.com" />
+                  <label htmlFor="athlete-email" className="block text-xs font-bold text-[var(--mist-500)] uppercase tracking-wider mb-2">Email de acceso</label>
+                  <input id="athlete-email" type="email" value={athleteFormData.email} onChange={(e) => setAthleteFormData({ ...athleteFormData, email: e.target.value })} className="w-full bg-[var(--ink-800)] border border-[var(--line-800)] text-[var(--mist-100)] font-bold rounded-xl p-3.5 focus:ring-4 focus:ring-[var(--signal-500)]/15 focus:border-[var(--signal-500)] outline-none transition-all" placeholder="atleta@correo.com" />
                 </div>
                 <div className="flex gap-3 pt-4">
-                  <button type="button" onClick={close} className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-3.5 rounded-xl transition-all active:scale-95">Cancelar</button>
-                  <button type="submit" disabled={isSubmitting} className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-black py-3.5 rounded-xl disabled:bg-blue-300 transition-all shadow-lg shadow-blue-600/30 active:scale-95 flex items-center justify-center gap-2">
+                  <button type="button" onClick={close} className="flex-1 bg-[var(--ink-800)] hover:bg-[var(--line-800)] text-[var(--mist-100)] font-bold py-3.5 rounded-xl transition-all active:scale-95">Cancelar</button>
+                  <button type="submit" disabled={isSubmitting} className="flex-1 bg-[var(--signal-500)] hover:bg-[var(--signal-600)] text-[var(--ink-950)] font-display font-bold uppercase tracking-wide py-3.5 rounded-xl disabled:opacity-40 transition-all active:scale-95 flex items-center justify-center gap-2">
                     {isSubmitting && <Loader2 size={16} className="animate-spin" />} Guardar
                   </button>
                 </div>
@@ -1046,15 +985,15 @@ export default function AthleteDetailView({
       )}
 
       {athleteToDelete && (
-        <ModalShell onClose={() => setAthleteToDelete(false)} labelledBy="delete-athlete-title" overlayClassName="bg-slate-900/60 backdrop-blur-sm" panelClassName="max-w-sm p-8 text-center" zIndexClassName="z-[70]">
+        <ModalShell onClose={() => setAthleteToDelete(false)} labelledBy="delete-athlete-title" panelClassName="max-w-sm p-8 text-center" zIndexClassName="z-[70]">
           {(close) => (
             <>
-              <div className="w-20 h-20 bg-red-50 text-red-500 rounded-full flex items-center justify-center mx-auto mb-5 shadow-inner"><AlertTriangle size={36} /></div>
-              <h3 id="delete-athlete-title" className="text-2xl font-black text-slate-800 mb-2">¿Eliminar Atleta?</h3>
-              <p className="text-sm font-medium text-slate-500 mb-8">Se borrará toda su planificación, rutinas y semanas de forma definitiva.</p>
+              <div className="w-20 h-20 bg-red-500/10 text-red-400 rounded-full flex items-center justify-center mx-auto mb-5"><AlertTriangle size={36} /></div>
+              <h3 id="delete-athlete-title" className="text-2xl font-display font-bold text-[var(--mist-100)] mb-2 uppercase tracking-wide">¿Eliminar Atleta?</h3>
+              <p className="text-sm font-medium text-[var(--mist-500)] mb-8">Se borrará toda su planificación, rutinas y semanas de forma definitiva.</p>
               <div className="flex gap-3">
-                <button onClick={close} className="flex-1 py-3.5 rounded-xl font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 transition-all active:scale-95">Cancelar</button>
-                <button onClick={confirmDeleteAthlete} disabled={isSubmitting} className="flex-1 py-3.5 rounded-xl font-black text-white bg-red-600 hover:bg-red-700 transition-all shadow-lg shadow-red-600/30 active:scale-95 flex items-center justify-center gap-2">
+                <button onClick={close} className="flex-1 py-3.5 rounded-xl font-bold text-[var(--mist-100)] bg-[var(--ink-800)] hover:bg-[var(--line-800)] transition-all active:scale-95">Cancelar</button>
+                <button onClick={confirmDeleteAthlete} disabled={isSubmitting} className="flex-1 py-3.5 rounded-xl font-black text-white bg-red-600 hover:bg-red-700 transition-all active:scale-95 flex items-center justify-center gap-2">
                   {isSubmitting && <Loader2 size={16} className="animate-spin" />} Sí, borrar
                 </button>
               </div>
@@ -1067,12 +1006,12 @@ export default function AthleteDetailView({
         <ModalShell onClose={() => setMacroToDelete(null)} labelledBy="delete-macro-title" panelClassName="max-w-sm p-8 text-center" zIndexClassName="z-[70]">
           {(close) => (
             <>
-              <div className="w-20 h-20 bg-red-50 text-red-500 rounded-full flex items-center justify-center mx-auto mb-5 shadow-inner"><AlertTriangle size={36} /></div>
-              <h3 id="delete-macro-title" className="text-2xl font-black text-slate-800 mb-2">¿Borrar Macrociclo?</h3>
-              <p className="text-sm font-medium text-slate-500 mb-8">Se perderán todos los mesociclos y días de entrenamiento cargados.</p>
+              <div className="w-20 h-20 bg-red-500/10 text-red-400 rounded-full flex items-center justify-center mx-auto mb-5"><AlertTriangle size={36} /></div>
+              <h3 id="delete-macro-title" className="text-2xl font-display font-bold text-[var(--mist-100)] mb-2 uppercase tracking-wide">¿Borrar Macrociclo?</h3>
+              <p className="text-sm font-medium text-[var(--mist-500)] mb-8">Se perderán todos los mesociclos y días de entrenamiento cargados.</p>
               <div className="flex gap-3">
-                <button onClick={close} className="flex-1 py-3.5 rounded-xl font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 transition-all active:scale-95">Cancelar</button>
-                <button onClick={confirmDeleteMacro} disabled={isSubmitting} className="flex-1 py-3.5 rounded-xl font-black text-white bg-red-600 hover:bg-red-700 transition-all shadow-lg shadow-red-600/30 active:scale-95 flex items-center justify-center gap-2">
+                <button onClick={close} className="flex-1 py-3.5 rounded-xl font-bold text-[var(--mist-100)] bg-[var(--ink-800)] hover:bg-[var(--line-800)] transition-all active:scale-95">Cancelar</button>
+                <button onClick={confirmDeleteMacro} disabled={isSubmitting} className="flex-1 py-3.5 rounded-xl font-black text-white bg-red-600 hover:bg-red-700 transition-all active:scale-95 flex items-center justify-center gap-2">
                   {isSubmitting && <Loader2 size={16} className="animate-spin" />} Sí, borrar
                 </button>
               </div>
@@ -1085,12 +1024,12 @@ export default function AthleteDetailView({
         <ModalShell onClose={() => setMesoToDelete(null)} labelledBy="delete-meso-title" panelClassName="max-w-sm p-8 text-center" zIndexClassName="z-[70]">
           {(close) => (
             <>
-              <div className="w-20 h-20 bg-red-50 text-red-500 rounded-full flex items-center justify-center mx-auto mb-5 shadow-inner"><AlertTriangle size={36} /></div>
-              <h3 id="delete-meso-title" className="text-2xl font-black text-slate-800 mb-2">¿Eliminar Mesociclo?</h3>
-              <p className="text-sm font-medium text-slate-500 mb-8">Los días de entrenamiento de este bloque desaparecerán del calendario.</p>
+              <div className="w-20 h-20 bg-red-500/10 text-red-400 rounded-full flex items-center justify-center mx-auto mb-5"><AlertTriangle size={36} /></div>
+              <h3 id="delete-meso-title" className="text-2xl font-display font-bold text-[var(--mist-100)] mb-2 uppercase tracking-wide">¿Eliminar Mesociclo?</h3>
+              <p className="text-sm font-medium text-[var(--mist-500)] mb-8">Los días de entrenamiento de este bloque desaparecerán del calendario.</p>
               <div className="flex gap-3">
-                <button onClick={close} className="flex-1 py-3.5 rounded-xl font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 transition-all active:scale-95">Cancelar</button>
-                <button onClick={confirmDeleteMeso} disabled={isSubmitting} className="flex-1 py-3.5 rounded-xl font-black text-white bg-red-600 hover:bg-red-700 transition-all shadow-lg shadow-red-600/30 active:scale-95 flex items-center justify-center gap-2">
+                <button onClick={close} className="flex-1 py-3.5 rounded-xl font-bold text-[var(--mist-100)] bg-[var(--ink-800)] hover:bg-[var(--line-800)] transition-all active:scale-95">Cancelar</button>
+                <button onClick={confirmDeleteMeso} disabled={isSubmitting} className="flex-1 py-3.5 rounded-xl font-black text-white bg-red-600 hover:bg-red-700 transition-all active:scale-95 flex items-center justify-center gap-2">
                   {isSubmitting && <Loader2 size={16} className="animate-spin" />} Sí, borrar
                 </button>
               </div>

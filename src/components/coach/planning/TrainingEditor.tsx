@@ -263,7 +263,7 @@ export default function TrainingEditor() {
                 <ReactQuill 
                   theme="snow" 
                   value={formData.notesHtml} 
-                  onChange={(content) => setFormData({...formData, notesHtml: content})}
+                  onChange={(content: string) => setFormData({...formData, notesHtml: content})}
                   className="h-full rounded-b-xl" 
                 />
               </div>

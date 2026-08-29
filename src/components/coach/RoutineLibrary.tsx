@@ -16,7 +16,7 @@ export default function RoutineLibrary({ coachId }: { coachId: string }) {
   const [activeTab, setActiveTab] = useState(1);
   const [formData, setFormData] = useState<{ id?: string, name: string, days: TemplateDay[] }>({
     name: "",
-    days: [{ dayNumber: 1, sessionType: "", exercises: [], notesHtml: "" }]
+    days: [{ dayNumber: 1, sessionType: "Día 1", exercises: [], notesHtml: "" }]
   });
 
   // Estado para eliminar
@@ -59,7 +59,7 @@ export default function RoutineLibrary({ coachId }: { coachId: string }) {
       // Nuevo
       setFormData({
         name: "",
-        days: [{ dayNumber: 1, sessionType: "", exercises: [], notesHtml: "" }]
+        days: [{ dayNumber: 1, sessionType: "Día 1", exercises: [], notesHtml: "" }]
       });
     }
     setActiveTab(1);
@@ -70,7 +70,7 @@ export default function RoutineLibrary({ coachId }: { coachId: string }) {
   const addDay = () => {
     setFormData(prev => ({
       ...prev,
-      days: [...prev.days, { dayNumber: prev.days.length + 1, sessionType: "", exercises: [], notesHtml: "" }]
+      days: [...prev.days, { dayNumber: prev.days.length + 1, sessionType: `Día ${prev.days.length + 1}`, exercises: [], notesHtml: "" }]
     }));
     setActiveTab(formData.days.length + 1);
   };
@@ -270,16 +270,11 @@ export default function RoutineLibrary({ coachId }: { coachId: string }) {
 
                   {activeDay && (
                     <div className="p-5 sm:p-6 space-y-6 animate-in fade-in">
-                      <div className="flex justify-between items-start gap-4">
-                        <div className="flex-1">
-                          <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Enfoque de este día</label>
-                          <input type="text" required placeholder="Ej: Tren Superior" value={activeDay.sessionType} onChange={e => updateActiveDay({ sessionType: e.target.value })} className="w-full bg-slate-50 border border-slate-200 text-slate-800 font-bold rounded-xl p-3 focus:ring-2 focus:ring-blue-600 outline-none" />
+                      {formData.days.length > 1 && (
+                        <div className="flex justify-end -mb-2">
+                          <button type="button" onClick={() => removeDay(activeDay.dayNumber)} className="p-3 text-red-500 bg-red-50 hover:bg-red-100 rounded-xl transition-colors" title="Eliminar Día"><Trash2 size={18}/></button>
                         </div>
-                        {formData.days.length > 1 && (
-                          <button type="button" onClick={() => removeDay(activeDay.dayNumber)} className="mt-6 p-3 text-red-500 bg-red-50 hover:bg-red-100 rounded-xl transition-colors" title="Eliminar Día"><Trash2 size={18}/></button>
-                        )}
-                      </div>
-
+                      )}
                       <div>
                         <div className="flex justify-between items-center mb-4">
                           <h3 className="font-black text-slate-800 flex items-center gap-2"><Dumbbell size={18} className="text-blue-500" /> Ejercicios</h3>

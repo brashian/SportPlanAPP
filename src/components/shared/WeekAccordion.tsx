@@ -32,52 +32,53 @@ export default function WeekAccordion({
         return (
           <div
             key={week.weekNumber}
-            className={`rounded-xl border overflow-hidden ${
-              current ? "border-blue-500" : "border-gray-200"
+            className={`rounded-xl border overflow-hidden transition-colors ${
+              current ? "border-[var(--signal-500)]/60" : "border-[var(--line-800)]"
             }`}
           >
             <button
               onClick={() => setOpenWeek(isOpen ? null : week.weekNumber)}
-              className={`w-full flex items-center justify-between px-4 py-3 text-left transition-colors ${
-                current ? "bg-blue-100/50" : "bg-white hover:bg-gray-50"
+              aria-expanded={isOpen}
+              className={`w-full flex items-center justify-between px-4 py-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--signal-500)] focus-visible:ring-inset ${
+                current ? "bg-[var(--signal-500)]/10" : "bg-[var(--ink-900)] hover:bg-[var(--ink-850)]"
               }`}
             >
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <span
-                  className={`text-sm font-semibold ${
-                    current ? "text-blue-500" : "text-gray-900"
+                  className={`text-sm font-bold ${
+                    current ? "text-[var(--signal-500)]" : "text-[var(--mist-100)]"
                   }`}
                 >
                   Semana {week.weekNumber}
                 </span>
                 {current && (
-                  <span className="text-[10px] uppercase tracking-wide bg-blue-500 text-white px-2 py-0.5 rounded-full">
+                  <span className="text-[10px] font-black uppercase tracking-wide bg-[var(--signal-500)] text-[var(--ink-950)] px-2 py-0.5 rounded-full">
                     Actual
                   </span>
                 )}
-                <span className="text-xs text-gray-500">{formatWeekRange(week)}</span>
+                <span className="text-xs text-[var(--mist-500)] font-medium">{formatWeekRange(week)}</span>
               </div>
               <ChevronDown
                 size={16}
-                className={`text-gray-400 transition-transform ${isOpen ? "rotate-180" : ""}`}
+                className={`text-[var(--mist-500)] transition-transform motion-reduce:transition-none ${isOpen ? "rotate-180" : ""}`}
               />
             </button>
 
             {isOpen && (
-              <div className="grid grid-cols-1 md:grid-cols-7 gap-2 p-3 bg-gray-50/60">
+              <div className="grid grid-cols-1 md:grid-cols-7 gap-2 p-3 bg-[var(--ink-950)] border-t border-[var(--line-800)]">
                 {week.days.map((day) => {
                   const today = isToday(day.date);
                   return (
                     <div
                       key={day.date}
-                      className={`rounded-xl border p-2 min-h-[140px] flex flex-col gap-2 bg-white ${
-                        today ? "border-blue-500 ring-1 ring-blue-500/30" : "border-gray-100"
+                      className={`rounded-xl border p-2 min-h-[140px] flex flex-col gap-2 bg-[var(--ink-900)] transition-colors ${
+                        today ? "border-[var(--signal-500)] ring-1 ring-[var(--signal-500)]/30" : "border-[var(--line-800)]"
                       }`}
                     >
                       <div className="flex items-center justify-between">
                         <span
-                          className={`text-xs font-medium capitalize ${
-                            today ? "text-blue-500" : "text-gray-500"
+                          className={`text-xs font-bold capitalize ${
+                            today ? "text-[var(--signal-500)]" : "text-[var(--mist-500)]"
                           }`}
                         >
                           {formatDayLabel(day.date)}
@@ -85,8 +86,8 @@ export default function WeekAccordion({
                         {!readOnly && (
                           <button
                             onClick={() => onAddBlock?.(day.date)}
-                            className="text-blue-500 hover:text-blue-600"
-                            aria-label="Agregar bloque"
+                            className="text-[var(--mist-500)] hover:text-[var(--signal-500)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--signal-500)] rounded"
+                            aria-label={`Agregar bloque el ${day.date}`}
                           >
                             <Plus size={14} />
                           </button>
@@ -95,8 +96,12 @@ export default function WeekAccordion({
 
                       <div className="space-y-2 flex-1">
                         {day.blocks.length === 0 && (
-                          <p className="text-[11px] text-gray-300 italic">Sin sesiones</p>
+                          <p className="text-[11px] text-[var(--mist-500)] italic">Sin sesiones</p>
                         )}
+                        {/* BlockCard es un componente hijo no reskinado todavía —
+                            va a renderizar con su estética propia (probablemente
+                            clara) dentro de esta celda oscura hasta que se pase
+                            su código para unificarlo con el resto del sistema. */}
                         {day.blocks.map((block) => (
                           <BlockCard
                             key={block.id}
