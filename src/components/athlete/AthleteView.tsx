@@ -1,11 +1,8 @@
 import React, { useState, useMemo, useCallback, Suspense } from "react";
 import type { Athlete, DailyBlock } from "../../types/models";
-import { Flame, Dumbbell, ChevronDown, Calendar as CalendarIcon, Activity, Trophy, ChevronRight, CheckCircle2, Loader2 } from "lucide-react";
+import { Flame, Dumbbell, ChevronDown, Calendar as CalendarIcon, Activity, Trophy, ChevronRight, CheckCircle2 } from "lucide-react";
+import GlobalLoader from "../ui/GlobalLoader"; // <-- Usamos el nuevo loader premium
 
-// PERFORMANCE: code-splitting. El modal de rutina diaria (con su editor de
-// ejercicios, reproductor de video embebido y el import dinámico de
-// html2pdf.js) recién se descarga cuando el atleta realmente abre un
-// entrenamiento, no en la carga inicial del home.
 const DailyRoutineModal = React.lazy(() => import("./DailyRoutineModal"));
 
 interface Props {
@@ -13,7 +10,6 @@ interface Props {
   blocksByMesocycle: Record<string, DailyBlock[]>;
 }
 
-// PERFORMANCE: Helper puro afuera del componente
 const getWeeksInRange = (start: string, end: string) => {
   const weeks = [];
   let current = new Date(start + "T12:00:00");
@@ -45,10 +41,6 @@ const getGroupColorClass = (groupId?: string) => {
   return colors[hash % colors.length];
 };
 
-// BUGFIX (isCompleted hardcodeado en false): el progreso real de ejercicios
-// vive en sessionStorage bajo la key `routine-progress-${block.id}` (la
-// escribe DailyRoutineModal). Un bloque se considera "completado" cuando
-// tiene ejercicios cargados y todos están tildados.
 const isRoutineFullyCompleted = (block?: DailyBlock | null): boolean => {
   if (!block) return false;
   const total = block.exercises?.length ?? 0;
@@ -65,11 +57,6 @@ const isRoutineFullyCompleted = (block?: DailyBlock | null): boolean => {
 
 export default function AthleteView({ athlete, blocksByMesocycle }: Props) {
   const [selectedDailyBlock, setSelectedDailyBlock] = useState<DailyBlock | null>(null);
-
-  // BUGFIX: contador que forzamos a incrementar cada vez que se cierra el
-  // modal, para releer sessionStorage y reflejar el progreso real (antes
-  // isCompleted quedaba hardcodeado en false, tanto en la tira semanal como
-  // en el calendario completo).
   const [completionTick, setCompletionTick] = useState(0);
 
   const closeDailyModal = useCallback(() => {
@@ -77,7 +64,6 @@ export default function AthleteView({ athlete, blocksByMesocycle }: Props) {
     setCompletionTick((t) => t + 1);
   }, []);
 
-  // PERFORMANCE: Pre-calculamos fechas y semanas una sola vez
   const { todayStr, currentWeekDays } = useMemo(() => {
     const now = new Date();
     const tStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
@@ -95,7 +81,6 @@ export default function AthleteView({ athlete, blocksByMesocycle }: Props) {
     return { todayStr: tStr, currentWeekDays: weekDays };
   }, []);
 
-  // UX & PERFORMANCE: Lazy Initializer para que nazca expandido (sin salto visual ni useEffect)
   const [expandedMesos, setExpandedMesos] = useState<Record<string, boolean>>(() => {
     const initial: Record<string, boolean> = {};
     athlete.macrocycles?.forEach(macro => {
@@ -108,7 +93,6 @@ export default function AthleteView({ athlete, blocksByMesocycle }: Props) {
     return initial;
   });
 
-  // PERFORMANCE: Único Map O(1) para buscar entrenamientos
   const blocksByDate = useMemo(() => {
     const map = new Map<string, DailyBlock>();
     Object.values(blocksByMesocycle).forEach(blocks => {
@@ -124,13 +108,10 @@ export default function AthleteView({ athlete, blocksByMesocycle }: Props) {
 
   return (
     <div className="min-h-screen bg-[var(--ink-950)] text-[var(--mist-300)] font-sans selection:bg-[var(--signal-500)]/30">
-
-      {/* PERFORMANCE: blur bajado a 80px + will-change para no asfixiar GPUs mobile */}
       <div className="fixed top-0 left-1/2 -translate-x-1/2 w-[800px] h-[400px] bg-[var(--signal-500)]/10 blur-[80px] rounded-full pointer-events-none z-0 will-change-transform"></div>
 
       <div className="relative z-10 max-w-3xl mx-auto p-4 sm:p-6 space-y-8 pb-24">
 
-        {/* ACCESIBILIDAD: motion-safe agregado */}
         <header className="flex items-center justify-between pt-4 motion-safe:animate-in motion-safe:slide-in-from-top-4 motion-safe:fade-in motion-safe:duration-500">
           <div>
             <p className="text-[var(--signal-500)] font-bold tracking-widest uppercase text-xs sm:text-sm">Hola de nuevo,</p>
@@ -141,7 +122,6 @@ export default function AthleteView({ athlete, blocksByMesocycle }: Props) {
           </div>
         </header>
 
-        {/* HERO CARD (Hoy) - A11Y + Focus Visible */}
         <div
           className="relative overflow-hidden rounded-[2rem] shadow-2xl transition-all duration-500 cursor-pointer group motion-safe:animate-in motion-safe:slide-in-from-bottom-4 motion-safe:fade-in motion-safe:duration-500 delay-100 fill-mode-both hover:scale-[1.02] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[var(--signal-500)] focus-visible:ring-offset-4 focus-visible:ring-offset-[var(--ink-950)]"
           onClick={() => todayBlock && setSelectedDailyBlock(todayBlock)}
@@ -179,7 +159,6 @@ export default function AthleteView({ athlete, blocksByMesocycle }: Props) {
           </div>
         </div>
 
-        {/* STRIP SEMANAL - A11Y + Focus Visible */}
         <div key={`week-${completionTick}`} className="bg-[var(--ink-900)]/60 backdrop-blur-xl border border-[var(--line-800)] rounded-3xl p-5 shadow-lg motion-safe:animate-in motion-safe:slide-in-from-bottom-4 motion-safe:fade-in motion-safe:duration-500 delay-200 fill-mode-both">
           <div className="flex justify-between items-center mb-4 px-2">
             <h3 className="font-display text-sm font-bold text-[var(--mist-300)] uppercase tracking-widest">Tu Semana</h3>
@@ -220,7 +199,6 @@ export default function AthleteView({ athlete, blocksByMesocycle }: Props) {
           </div>
         </div>
 
-        {/* CALENDARIO PREMIUM */}
         <div className="pt-4 motion-safe:animate-in motion-safe:slide-in-from-bottom-4 motion-safe:fade-in motion-safe:duration-500 delay-300 fill-mode-both">
           <div className="flex items-center gap-3 mb-6 px-2">
             <CalendarIcon className="text-[var(--signal-500)]" size={24}/>
@@ -277,7 +255,6 @@ export default function AthleteView({ athlete, blocksByMesocycle }: Props) {
                                     const isToday = dateStr === todayStr;
                                     const isCompleted = isRoutineFullyCompleted(block);
 
-                                    // Colores de grupo para renderizar en la barrita inferior
                                     const groupIds = Array.from(new Set(block?.exercises?.map(e => e.groupId).filter(Boolean)));
 
                                     return (
@@ -305,7 +282,6 @@ export default function AthleteView({ athlete, blocksByMesocycle }: Props) {
                                           )}
                                         </div>
 
-                                        {/* Franja de colores por Grupo (Detalle Visual) */}
                                         {block && groupIds.length > 0 && !isToday && (
                                           <div className="absolute bottom-0 left-0 right-0 h-1 flex opacity-80">
                                             {groupIds.map((g, i) => (
@@ -332,13 +308,7 @@ export default function AthleteView({ athlete, blocksByMesocycle }: Props) {
       </div>
 
       {selectedDailyBlock && (
-        <Suspense
-          fallback={
-            <div className="fixed inset-0 bg-[var(--ink-950)]/80 backdrop-blur-sm flex items-center justify-center z-[100]">
-              <Loader2 className="animate-spin text-[var(--signal-500)]" size={32} />
-            </div>
-          }
-        >
+        <Suspense fallback={<GlobalLoader />}>
           <DailyRoutineModal block={selectedDailyBlock} onClose={closeDailyModal} />
         </Suspense>
       )}

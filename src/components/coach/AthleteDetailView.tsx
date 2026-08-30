@@ -161,22 +161,35 @@ export default function AthleteDetailView({
     setAthleteToDelete(false);
   };
 
+  // FIX: sin try/catch, si onDeleteMacrocycle rechaza (ahora que App.tsx
+  // relanza los errores de Firestore en vez de tragárselos con alert()), el
+  // spinner del botón quedaba girando para siempre y nunca se avisaba del error.
   const confirmDeleteMacro = async () => {
     if (!macroToDelete || !athlete) return;
     setIsSubmitting(true);
-    await onDeleteMacrocycle(macroToDelete, athlete.id);
-    setIsSubmitting(false);
-    setMacroToDelete(null);
-    showToast('success', 'Macrociclo eliminado.');
+    try {
+      await onDeleteMacrocycle(macroToDelete, athlete.id);
+      setMacroToDelete(null);
+      showToast('success', 'Macrociclo eliminado.');
+    } catch (e) {
+      showToast('error', 'No se pudo eliminar el macrociclo.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const confirmDeleteMeso = async () => {
     if (!mesoToDelete) return;
     setIsSubmitting(true);
-    await onDeleteMesocycle(mesoToDelete.macroId, mesoToDelete.mesoId);
-    setIsSubmitting(false);
-    setMesoToDelete(null);
-    showToast('success', 'Mesociclo eliminado.');
+    try {
+      await onDeleteMesocycle(mesoToDelete.macroId, mesoToDelete.mesoId);
+      setMesoToDelete(null);
+      showToast('success', 'Mesociclo eliminado.');
+    } catch (e) {
+      showToast('error', 'No se pudo eliminar el mesociclo.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   useEffect(() => {

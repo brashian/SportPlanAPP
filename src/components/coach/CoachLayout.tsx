@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
-import { Users, Calendar, BookOpen, LogOut, Menu, X, Dumbbell, ChevronsLeft, ChevronsRight } from 'lucide-react';
+import { Users, Calendar, BookOpen, LogOut, Menu, X, ChevronsLeft, ChevronsRight } from 'lucide-react';
 import { signOut } from 'firebase/auth';
 import { auth } from '../../firebase';
+import BrandLogo from '../ui/BrandLogo';
 
 // Design tokens — grafito atlético + acento "cronómetro"
 const tokens = {
@@ -49,31 +50,23 @@ export default function CoachLayout({ coachName }: { coachName: string }) {
 
   return (
     <div
-      className="flex h-screen bg-[var(--ink-950)] overflow-hidden font-sans antialiased"
+      className="flex h-[100dvh] bg-[var(--ink-950)] overflow-hidden font-sans antialiased selection:bg-[var(--signal-500)]/30"
       style={tokens}
     >
-      {/* Fuentes: agregar en index.html —
-        <link rel="preconnect" href="https://fonts.googleapis.com">
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-        <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&display=swap" rel="stylesheet">
-      */}
       <style>{`
         .font-display { font-family: 'Barlow Condensed', system-ui, sans-serif; }
       `}</style>
 
       {/* Mobile Header */}
-      <div className="md:hidden fixed top-0 left-0 right-0 h-16 bg-[var(--ink-900)] border-b border-[var(--line-800)] text-[var(--mist-100)] flex items-center justify-between px-4 z-50">
-        <div className="flex items-center gap-2 font-display font-bold text-2xl tracking-wide">
-          <div className="w-8 h-8 bg-[var(--signal-500)] rounded-lg flex items-center justify-center">
-            <Dumbbell size={16} className="text-[var(--ink-950)]" />
-          </div>
-          SPORTPLAN
+      <div className="md:hidden fixed top-0 left-0 right-0 h-16 bg-[var(--ink-900)] border-b border-[var(--line-800)] text-[var(--mist-100)] flex items-center justify-between px-4 z-50 shadow-sm">
+        <div className="flex items-center gap-2 h-8">
+          <BrandLogo className="h-full w-auto drop-shadow-md" />
         </div>
         <button
           onClick={() => setIsSidebarOpen(!isSidebarOpen)}
           aria-label={isSidebarOpen ? 'Cerrar menú' : 'Abrir menú'}
           aria-expanded={isSidebarOpen}
-          className="p-2 bg-[var(--ink-800)] rounded-lg text-[var(--mist-100)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--signal-500)]"
+          className="p-2 bg-[var(--ink-800)] rounded-lg text-[var(--mist-100)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--signal-500)] active:scale-95 transition-transform"
         >
           {isSidebarOpen ? <X size={22} /> : <Menu size={22} />}
         </button>
@@ -82,7 +75,7 @@ export default function CoachLayout({ coachName }: { coachName: string }) {
       {/* Sidebar Overlay (mobile) */}
       {isSidebarOpen && (
         <div
-          className="md:hidden fixed inset-0 bg-[var(--ink-950)]/70 backdrop-blur-sm z-40 motion-reduce:backdrop-blur-none"
+          className="md:hidden fixed inset-0 bg-[var(--ink-950)]/80 backdrop-blur-sm z-40"
           onClick={() => setIsSidebarOpen(false)}
           aria-hidden="true"
         />
@@ -93,34 +86,29 @@ export default function CoachLayout({ coachName }: { coachName: string }) {
         className={`
           fixed md:static inset-y-0 left-0 z-50 flex flex-col
           bg-[var(--ink-900)] border-r border-[var(--line-800)]
-          transition-[transform,width] duration-300 ease-out motion-reduce:transition-none
+          transition-[transform,width] duration-300 ease-out shadow-2xl md:shadow-none
           ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}
           ${isCollapsed ? 'md:w-20' : 'w-72'}
         `}
       >
-        {/* Logo */}
-        <div className={`h-20 flex items-center gap-3 border-b border-[var(--line-800)] ${isCollapsed ? 'md:justify-center md:px-0 px-8' : 'px-8'}`}>
-          <div className="w-10 h-10 shrink-0 bg-[var(--signal-500)] rounded-xl flex items-center justify-center shadow-[0_0_0_1px_rgba(255,90,31,0.25)]">
-            <Dumbbell size={20} className="text-[var(--ink-950)]" />
+        {/* Logo Area */}
+        <div className={`h-20 flex items-center border-b border-[var(--line-800)] shrink-0 transition-all duration-300 ${isCollapsed ? 'justify-center px-0' : 'px-6'}`}>
+          <div className={`flex items-center justify-center transition-all duration-300 ${isCollapsed ? 'h-10 w-10' : 'h-10 w-full justify-start'}`}>
+            <BrandLogo className={`object-contain ${isCollapsed ? 'w-full h-full' : 'h-full w-auto'}`} />
           </div>
-          {!isCollapsed && (
-            <span className="font-display font-bold text-2xl tracking-wide text-[var(--mist-100)] whitespace-nowrap">
-              SPORTPLAN
-            </span>
-          )}
         </div>
 
         {/* Coach card */}
-        <div className={`border-b border-[var(--line-800)] py-5 ${isCollapsed ? 'md:px-0 md:flex md:justify-center px-6' : 'px-6'}`}>
+        <div className={`border-b border-[var(--line-800)] py-5 shrink-0 ${isCollapsed ? 'md:px-0 md:flex md:justify-center px-6' : 'px-6'}`}>
           <div className={`flex items-center gap-3 ${isCollapsed ? 'md:justify-center' : ''}`}>
             <div className="relative shrink-0">
-              <div className="w-10 h-10 rounded-full bg-[var(--ink-800)] border border-[var(--line-800)] flex items-center justify-center font-display font-bold text-sm text-[var(--mist-100)]">
+              <div className="w-10 h-10 rounded-full bg-[var(--ink-800)] border border-[var(--line-800)] flex items-center justify-center font-display font-bold text-sm text-[var(--mist-100)] shadow-inner">
                 {initials}
               </div>
               <span className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full bg-[var(--pulse-500)] ring-2 ring-[var(--ink-900)]" />
             </div>
             {!isCollapsed && (
-              <div className="min-w-0">
+              <div className="min-w-0 transition-opacity duration-300">
                 <p className="text-[10px] font-bold text-[var(--mist-500)] uppercase tracking-widest">Entrenador</p>
                 <p className="font-semibold text-[var(--mist-100)] truncate leading-tight">{coachName}</p>
               </div>
@@ -129,7 +117,7 @@ export default function CoachLayout({ coachName }: { coachName: string }) {
         </div>
 
         {/* Nav */}
-        <nav className="flex-1 px-3 py-6 space-y-1 overflow-y-auto overflow-x-hidden">
+        <nav className="flex-1 px-3 py-6 space-y-2 overflow-y-auto custom-scrollbar">
           {navLinks.map((link) => (
             <NavLink
               key={link.to}
@@ -137,24 +125,24 @@ export default function CoachLayout({ coachName }: { coachName: string }) {
               onClick={() => setIsSidebarOpen(false)}
               title={isCollapsed ? link.label : undefined}
               className={({ isActive }) => `
-                relative flex items-center gap-3 rounded-lg font-semibold text-sm
-                transition-colors duration-150 motion-reduce:transition-none
+                relative flex items-center gap-3 rounded-xl font-bold text-sm
+                transition-all duration-200
                 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--signal-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--ink-900)]
-                ${isCollapsed ? 'md:justify-center md:px-0 md:py-3 px-4 py-3' : 'px-4 py-3'}
+                ${isCollapsed ? 'md:justify-center md:px-0 md:py-3.5 px-4 py-3.5' : 'px-4 py-3.5'}
                 ${isActive
-                  ? 'bg-[var(--ink-800)] text-[var(--mist-100)]'
+                  ? 'bg-[var(--ink-850)] text-[var(--mist-100)] shadow-sm'
                   : 'text-[var(--mist-300)] hover:bg-[var(--ink-850)] hover:text-[var(--mist-100)]'}
               `}
             >
               {({ isActive }) => (
                 <>
-                  {/* Carril activo — marca de pista */}
+                  {/* Carril activo — marca de pista estilo neón */}
                   <span
-                    className={`absolute left-0 top-1/2 -translate-y-1/2 w-1 rounded-full bg-[var(--signal-500)] transition-all duration-200 motion-reduce:transition-none ${
-                      isActive ? 'h-5 opacity-100' : 'h-0 opacity-0'
+                    className={`absolute left-0 top-1/2 -translate-y-1/2 w-1 rounded-full bg-[var(--signal-500)] shadow-[0_0_8px_var(--signal-500)] transition-all duration-300 ${
+                      isActive ? 'h-6 opacity-100' : 'h-0 opacity-0'
                     }`}
                   />
-                  <link.icon size={19} strokeWidth={2.25} className={isActive ? 'text-[var(--signal-500)]' : ''} />
+                  <link.icon size={20} className={isActive ? 'text-[var(--signal-500)]' : ''} />
                   {!isCollapsed && <span className="truncate">{link.label}</span>}
                 </>
               )}
@@ -165,27 +153,27 @@ export default function CoachLayout({ coachName }: { coachName: string }) {
         {/* Colapsar (solo desktop) */}
         <button
           onClick={() => setIsCollapsed((v) => !v)}
-          className="hidden md:flex items-center gap-2 mx-3 mb-2 px-4 py-2.5 rounded-lg text-[var(--mist-500)] hover:bg-[var(--ink-850)] hover:text-[var(--mist-100)] transition-colors text-xs font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--signal-500)]"
+          className="hidden md:flex items-center justify-center gap-2 mx-3 mb-2 px-4 py-3 rounded-xl text-[var(--mist-500)] hover:bg-[var(--ink-850)] hover:text-[var(--mist-100)] transition-colors text-xs font-bold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--signal-500)]"
         >
-          {isCollapsed ? <ChevronsRight size={16} /> : <><ChevronsLeft size={16} /> Colapsar</>}
+          {isCollapsed ? <ChevronsRight size={18} /> : <><ChevronsLeft size={18} /> Colapsar Menú</>}
         </button>
 
         {/* Logout */}
-        <div className="p-3 border-t border-[var(--line-800)]">
+        <div className="p-3 border-t border-[var(--line-800)] shrink-0">
           <button
             onClick={handleLogout}
             title={isCollapsed ? 'Cerrar sesión' : undefined}
-            className={`flex items-center gap-3 w-full rounded-lg font-semibold text-sm text-red-400 hover:bg-red-500/10 hover:text-red-300 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400 ${
-              isCollapsed ? 'md:justify-center md:px-0 md:py-3 px-4 py-3' : 'px-4 py-3'
+            className={`flex items-center gap-3 w-full rounded-xl font-bold text-sm text-red-400 bg-red-500/10 hover:bg-red-500/20 hover:text-red-300 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400 ${
+              isCollapsed ? 'md:justify-center md:px-0 md:py-3.5 px-4 py-3.5' : 'px-4 py-3.5'
             }`}
           >
-            <LogOut size={19} strokeWidth={2.25} />
+            <LogOut size={20} />
             {!isCollapsed && 'Cerrar Sesión'}
           </button>
         </div>
       </aside>
 
-      {/* Main Content */}
+      {/* Main Content con Outlet */}
       <main className="flex-1 relative overflow-y-auto pt-16 md:pt-0 bg-[var(--ink-950)]">
         <Outlet />
       </main>

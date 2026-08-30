@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { Plus, Pencil, Loader2, AlertCircle } from "lucide-react";
 import DatePicker from "react-datepicker";
+//error este por version
 import "react-datepicker/dist/react-datepicker.css";
 import type { DailyBlock, Macrocycle, Mesocycle, MesocyclePhase } from "../../types/models";
 import { MESOCYCLE_PHASES } from "../../types/models";
