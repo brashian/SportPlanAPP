@@ -9,6 +9,7 @@ export interface AuthUser {
   id: string;
   role: UserRole;
   name: string;
+  email?: string;
   avatarUrl?: string;
 }
 

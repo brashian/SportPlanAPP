@@ -1,9 +1,9 @@
-import React, { useState, useEffect, lazy, Suspense } from "react";
+import { useState, useEffect, lazy, Suspense } from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
-import type { AuthUser, Athlete, DailyBlock, Mesocycle, MesocyclePhase, Macrocycle } from "./types/models";
+import type { AuthUser, Athlete, DailyBlock, Mesocycle, MesocyclePhase, Macrocycle, UserRole } from "./types/models";
 import { db, auth } from "./firebase";
 import { collection, doc, setDoc, getDoc, getDocs, query, where, updateDoc, arrayUnion, deleteDoc } from "firebase/firestore";
-import { onAuthStateChanged, signOut } from 'firebase/auth';
+import { onAuthStateChanged, signOut, type User } from 'firebase/auth';
 import LoginView from './components/log/LoginView';
 import { AlertCircle, LogOut, Dumbbell } from 'lucide-react';
 
@@ -71,30 +71,36 @@ function AthleteListSkeleton() {
 }
 
 export default function App() {
-  const [user, setUser] = useState<any>(null);
-  const [role, setRole] = useState<string | null>(null);
+  const [user, setUser] = useState<User | null>(null);
+  const [role, setRole] = useState<UserRole | null>(null);
   const [isApproved, setIsApproved] = useState<boolean | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
-      if (currentUser) {
-        setUser(currentUser);
-        const userDoc = await getDoc(doc(db, 'users', currentUser.uid));
-        if (userDoc.exists()) {
-          const data = userDoc.data();
-          setRole(data.role);
-          setIsApproved(data.isApproved ?? true);
+      try {
+        if (currentUser) {
+          setUser(currentUser);
+          const userDoc = await getDoc(doc(db, 'users', currentUser.uid));
+          if (userDoc.exists()) {
+            const data = userDoc.data();
+            setRole(data.role);
+            setIsApproved(data.isApproved ?? true);
+          } else {
+            setRole('athlete');
+            setIsApproved(true);
+          }
         } else {
-          setRole('athlete');
-          setIsApproved(true);
+          setUser(null);
+          setRole(null);
+          setIsApproved(null);
         }
-      } else {
-        setUser(null);
-        setRole(null);
-        setIsApproved(null);
+      } catch (error) {
+        console.error("Error al cargar el perfil del usuario:", error);
+        await signOut(auth).catch(() => {});
+      } finally {
+        setLoading(false);
       }
-      setLoading(false);
     });
 
     return () => unsubscribe();
@@ -125,15 +131,15 @@ export default function App() {
   return (
     <Suspense fallback={<LoadingScreen message="Cargando plataforma..." variant={role === 'athlete' ? 'dark' : 'light'} />}>
       {role === 'coach' ? (
-        <CoachApp currentUser={{ id: user.uid, role: 'coach', name: user.email || "Coach", email: user.email }} />
+        <CoachApp currentUser={{ id: user.uid, role: 'coach', name: user.email || "Coach", email: user.email ?? undefined }} />
       ) : (
-        <AthleteApp currentUser={{ id: user.uid, role: 'athlete', name: user.email || "Atleta", email: user.email }} />
+        <AthleteApp currentUser={{ id: user.uid, role: 'athlete', name: user.email || "Atleta", email: user.email ?? undefined }} />
       )}
     </Suspense>
   );
 }
 
-function CoachApp({ currentUser }: { currentUser: any }) {
+function CoachApp({ currentUser }: { currentUser: AuthUser }) {
   const coachId = currentUser.id;
   const coachName = currentUser.name;
 
@@ -354,7 +360,7 @@ function CoachApp({ currentUser }: { currentUser: any }) {
   );
 }
 
-function AthleteApp({ currentUser }: { currentUser: any }) {
+function AthleteApp({ currentUser }: { currentUser: AuthUser }) {
   const athleteEmail = currentUser.email;
   const [athlete, setAthlete] = useState<Athlete | null>(null);
   const [blocksByMesocycle, setBlocksByMesocycle] = useState<Record<string, DailyBlock[]>>({});
@@ -362,7 +368,7 @@ function AthleteApp({ currentUser }: { currentUser: any }) {
 
   useEffect(() => {
     async function fetchAthleteData() {
-      if (!athleteEmail) return;
+      if (!athleteEmail) { setIsLoading(false); return; }
       try {
         const q = query(collection(db, "athletes"), where("email", "==", athleteEmail));
         const snapshot = await getDocs(q);
