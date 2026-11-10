@@ -215,7 +215,7 @@ export default function AthleteView({ athlete, blocksByMesocycle }: Props) {
                 <div key={macro.id} className="space-y-4">
                   <h3 className="text-xs font-black text-[var(--mist-500)] uppercase tracking-widest pl-4">{macro.name}</h3>
 
-                  {macro.mesocycles?.map((meso) => {
+                  {[...(macro.mesocycles || [])].sort((a, b) => a.startDate.localeCompare(b.startDate)).map((meso) => {
                     const isOpen = expandedMesos[meso.id] || false;
                     const mesoWeeks = getWeeksInRange(meso.startDate, meso.endDate);
 

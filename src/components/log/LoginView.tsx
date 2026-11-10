@@ -53,9 +53,8 @@ export default function LoginView() {
       if (role === 'coach') {
         await setDoc(doc(db, 'coaches', uid), { id: uid, name, email, role: 'coach', isApproved: false, athleteIds: [] });
         await signOut(auth); setMode('pending');
-      } else {
-        await setDoc(doc(db, 'athletes', uid), { id: uid, name, email, role: 'athlete', coachId: '', macrocycles: [] });
       }
+      // Atleta: no se crea documento propio. El vínculo lo arma el coach al darlo de alta con este email.
     } catch (err: any) {
       if (err.code === 'auth/email-already-in-use') setError('El email ya está registrado.');
       else if (err.code === 'auth/weak-password') setError('La contraseña debe tener al menos 6 caracteres.');

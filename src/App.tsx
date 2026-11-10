@@ -2,7 +2,7 @@ import { useState, useEffect, lazy, Suspense } from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
 import type { AuthUser, Athlete, DailyBlock, Mesocycle, MesocyclePhase, Macrocycle, UserRole } from "./types/models";
 import { db, auth } from "./firebase";
-import { collection, doc, setDoc, getDoc, getDocs, query, where, updateDoc, arrayUnion, deleteDoc } from "firebase/firestore";
+import { collection, doc, setDoc, getDoc, getDocs, query, where, updateDoc, arrayUnion, deleteDoc, writeBatch } from "firebase/firestore";
 import { onAuthStateChanged, signOut, type User } from 'firebase/auth';
 import LoginView from './components/log/LoginView';
 import { AlertCircle, LogOut, Dumbbell } from 'lucide-react';
@@ -14,6 +14,10 @@ const AthleteDetailView = lazy(() => import("./components/coach/AthleteDetailVie
 const AthleteLayout = lazy(() => import("./components/athlete/AthleteLayout"));
 const AthleteView = lazy(() => import("./components/athlete/AthleteView"));
 const RoutineLibrary = lazy(() => import("./components/coach/RoutineLibrary"));
+
+// Firebase Auth devuelve los emails en minúsculas; guardamos y buscamos igual
+// para que el vínculo coach → atleta no dependa de cómo se tipeó el email.
+const normalizeEmail = (email?: string) => (email ?? "").trim().toLowerCase();
 
 // ── Pantallas de carga premium (reemplazan los flashes blancos/grises) ──────
 // 'dark' matcheá la estética del lado atleta (fondo navy + glow azul, como
@@ -160,6 +164,27 @@ function CoachApp({ currentUser }: { currentUser: AuthUser }) {
             phone: data.phone || "", macrocycles: data.macrocycles || [],
           } as Athlete);
         });
+
+        // Los macrociclos viven en su propia colección: los traemos para que la
+        // lista muestre el contador real. Firestore limita "in" a 30 valores, por
+        // eso va en grupos. Si falla (ej. reglas), la lista carga igual.
+        try {
+          const ids = fetchedAthletes.map((a) => a.id);
+          const macrosByAthlete: Record<string, Macrocycle[]> = {};
+          for (let i = 0; i < ids.length; i += 30) {
+            const macroSnap = await getDocs(query(collection(db, "macrocycles"), where("athleteId", "in", ids.slice(i, i + 30))));
+            macroSnap.forEach((macroDoc) => {
+              const macro = { id: macroDoc.id, ...macroDoc.data() } as Macrocycle;
+              (macrosByAthlete[macro.athleteId] ||= []).push(macro);
+            });
+          }
+          fetchedAthletes.forEach((a) => {
+            a.macrocycles = (macrosByAthlete[a.id] || []).sort((x, y) => x.startDate.localeCompare(y.startDate));
+          });
+        } catch (error) {
+          console.error("Error al traer los macrociclos de la lista:", error);
+        }
+
         setAthletes(fetchedAthletes);
       } catch (error) { console.error("Error al traer los atletas:", error); }
       finally { setIsLoading(false); }
@@ -172,7 +197,7 @@ function CoachApp({ currentUser }: { currentUser: AuthUser }) {
       const newAthleteRef = doc(collection(db, "athletes"));
       const newAthlete: Athlete = {
         id: newAthleteRef.id, coachId: coachId, name: data.name, firstName: "", lastName: "",
-        sport: data.sport, email: data.email || "", phone: data.phone || "", macrocycles: [],
+        sport: data.sport, email: normalizeEmail(data.email), phone: data.phone || "", macrocycles: [],
       };
       await setDoc(newAthleteRef, newAthlete);
       setAthletes((prev) => [...prev, newAthlete]);
@@ -184,17 +209,34 @@ function CoachApp({ currentUser }: { currentUser: AuthUser }) {
 
   async function handleUpdateAthlete(athleteId: string, data: { name: string; sport: string; email?: string; phone?: string }) {
     try {
-      await updateDoc(doc(db, "athletes", athleteId), data);
-      setAthletes((prev) => prev.map((a) => a.id === athleteId ? { ...a, ...data } : a));
+      const payload = { ...data, email: normalizeEmail(data.email) };
+      await updateDoc(doc(db, "athletes", athleteId), payload);
+      setAthletes((prev) => prev.map((a) => a.id === athleteId ? { ...a, ...payload } : a));
     } catch (error) {
       console.error("Error al actualizar el atleta:", error);
       throw error; // AthleteDetailView ya lo captura y muestra un toast
     }
   }
 
+  // Borra el atleta junto con toda su planificación en una sola operación
+  // atómica: o se borra todo, o no se borra nada (sin documentos huérfanos).
   async function handleDeleteAthlete(athleteId: string) {
     try {
-      await deleteDoc(doc(db, "athletes", athleteId));
+      const [macroSnap, routinesSnap] = await Promise.all([
+        getDocs(query(collection(db, "macrocycles"), where("athleteId", "==", athleteId))),
+        getDocs(query(collection(db, "monthlyRoutines"), where("athleteId", "==", athleteId))),
+      ]);
+
+      const batch = writeBatch(db);
+      macroSnap.forEach((macroDoc) => {
+        const mesos: Mesocycle[] = macroDoc.data().mesocycles || [];
+        mesos.forEach((meso) => batch.delete(doc(db, "mesocycleBlocks", meso.id)));
+        batch.delete(macroDoc.ref);
+      });
+      routinesSnap.forEach((routineDoc) => batch.delete(routineDoc.ref));
+      batch.delete(doc(db, "athletes", athleteId));
+      await batch.commit();
+
       setAthletes((prev) => prev.filter((a) => a.id !== athleteId));
       return true;
     } catch (error) {
@@ -220,7 +262,14 @@ function CoachApp({ currentUser }: { currentUser: AuthUser }) {
 
   async function handleDeleteMacrocycle(macrocycleId: string, athleteId: string) {
     try {
-      await deleteDoc(doc(db, "macrocycles", macrocycleId));
+      // Lee los mesociclos desde Firestore (no del estado local) para no dejar bloques huérfanos
+      const macroSnap = await getDoc(doc(db, "macrocycles", macrocycleId));
+      const mesos: Mesocycle[] = macroSnap.exists() ? macroSnap.data().mesocycles || [] : [];
+
+      const batch = writeBatch(db);
+      mesos.forEach((meso) => batch.delete(doc(db, "mesocycleBlocks", meso.id)));
+      batch.delete(doc(db, "macrocycles", macrocycleId));
+      await batch.commit();
       setAthletes((prev) => prev.map((a) => a.id !== athleteId ? a : {
         ...a, macrocycles: a.macrocycles.filter((m) => m.id !== macrocycleId)
       }));
@@ -370,10 +419,11 @@ function AthleteApp({ currentUser }: { currentUser: AuthUser }) {
     async function fetchAthleteData() {
       if (!athleteEmail) { setIsLoading(false); return; }
       try {
-        const q = query(collection(db, "athletes"), where("email", "==", athleteEmail));
+        const q = query(collection(db, "athletes"), where("email", "==", normalizeEmail(athleteEmail)));
         const snapshot = await getDocs(q);
         if (snapshot.empty) { setAthlete(null); setIsLoading(false); return; }
-        const athleteDoc = snapshot.docs[0];
+        // Si hay duplicados (registro viejo + alta del coach), gana el vinculado a un coach
+        const athleteDoc = snapshot.docs.find((d) => d.data().coachId) ?? snapshot.docs[0];
         const athleteData = { id: athleteDoc.id, ...athleteDoc.data() } as Athlete;
 
         const macroQuery = query(collection(db, "macrocycles"), where("athleteId", "==", athleteData.id));

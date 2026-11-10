@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, useRef } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { collection, query, where, getDocs, getDoc, doc, setDoc, updateDoc, deleteDoc } from "firebase/firestore";
 import { db } from "../../firebase";
@@ -6,18 +6,19 @@ import type { Athlete, DailyBlock, Mesocycle, MesocyclePhase, Macrocycle, Routin
 import ReactQuill from 'react-quill';
 import 'react-quill/dist/quill.snow.css';
 import MonthlyRoutineManager from "./MonthlyRoutineManager";
-import { Trash2, Edit3, AlertTriangle, X, ChevronLeft, Plus, Dumbbell, Calendar, Target, Loader2, CheckCircle2, XCircle, SearchX } from "lucide-react";
+import { Trash2, Edit3, AlertTriangle, X, ChevronLeft, Plus, Dumbbell, Calendar, Loader2, CheckCircle2, XCircle, SearchX, AlertCircle } from "lucide-react";
 import ModalShell from "../shared/ModalShell";
 
 interface AthleteDetailViewProps {
   athletes: Athlete[];
   onLoadMacrocycles: (athleteId: string, macros: Macrocycle[]) => void;
   onCreateMacrocycle: (athleteId: string, data: { name: string; startDate: string; endDate: string }) => void;
-  onUpdateMacrocycle: (macrocycleId: string, data: { name: string; startDate: string; endDate: string }) => void;
+  onUpdateMacrocycle: (macrocycleId: string, data: { name: string; startDate: string; endDate: string }) => Promise<void>;
   onDeleteMacrocycle: (macrocycleId: string, athleteId: string) => void;
   onCreateMesocycle: (macrocycleId: string, data: { name: string; phase: MesocyclePhase; startDate: string; endDate: string }) => void;
-  onUpdateMesocycle: (mesocycleId: string, data: { name: string; phase: MesocyclePhase; startDate: string; endDate: string }) => void;
+  onUpdateMesocycle: (mesocycleId: string, data: { name: string; phase: MesocyclePhase; startDate: string; endDate: string }) => Promise<void>;
   onDeleteMesocycle: (macrocycleId: string, mesocycleId: string) => void;
+  // Sin UI por ahora (los mesociclos se muestran ordenados por fecha); se mantiene para un futuro drag & drop
   onReorderMesocycles: (macrocycleId: string, reordered: Mesocycle[]) => void;
   onUpdateAthlete: (athleteId: string, data: { name: string; sport: string; email?: string; phone?: string }) => Promise<void>;
   onDeleteAthlete: (athleteId: string) => Promise<boolean>;
@@ -26,6 +27,12 @@ interface AthleteDetailViewProps {
 // ── Helpers puros (fuera del componente: no se recrean en cada render) ──────
 
 const DAY_NAMES = ["Domingo", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"];
+
+// "yyyy-MM-dd" → "dd/MM"
+const toDayMonth = (isoDate: string) => isoDate.split('-').reverse().slice(0, 2).join('/');
+
+// Las fechas son ISO "yyyy-MM-dd", así que la comparación de strings respeta el orden cronológico
+const sortMesosByStart = (mesos: Mesocycle[] = []) => [...mesos].sort((a, b) => a.startDate.localeCompare(b.startDate));
 
 const getWeeksInRange = (start: string, end: string) => {
   const weeks: { label: string; days: { date: string; name: string }[] }[] = [];
@@ -97,7 +104,7 @@ function Toast({ toast, onDismiss }: { toast: ToastState | null; onDismiss: () =
 
 export default function AthleteDetailView({
   athletes, onLoadMacrocycles, onCreateMacrocycle, onUpdateMacrocycle, onDeleteMacrocycle,
-  onCreateMesocycle, onUpdateMesocycle, onDeleteMesocycle, onReorderMesocycles, onUpdateAthlete, onDeleteAthlete
+  onCreateMesocycle, onUpdateMesocycle, onDeleteMesocycle, onUpdateAthlete, onDeleteAthlete
 }: AthleteDetailViewProps) {
   const { athleteId } = useParams<{ athleteId: string }>();
   const navigate = useNavigate();
@@ -126,6 +133,8 @@ export default function AthleteDetailView({
 
   const [toast, setToast] = useState<ToastState | null>(null);
   const showToast = useCallback((type: ToastState['type'], message: string) => setToast({ type, message }), []);
+  // Referencia estable: si cambiara en cada render, el temporizador del Toast se reiniciaría sin parar
+  const dismissToast = useCallback(() => setToast(null), []);
 
   const handleOpenEditAthlete = () => {
     if (!athlete) return;
@@ -193,6 +202,8 @@ export default function AthleteDetailView({
   };
 
   useEffect(() => {
+    // Descarta respuestas de un atleta anterior si el coach navega rápido entre perfiles
+    let cancelled = false;
     async function fetchData() {
       if (!athlete?.coachId) return;
       try {
@@ -200,19 +211,23 @@ export default function AthleteDetailView({
         const snapT = await getDocs(qT);
         const loadedT: RoutineTemplate[] = [];
         snapT.forEach(doc => loadedT.push({ id: doc.id, ...doc.data() } as RoutineTemplate));
-        setTemplates(loadedT);
 
         const qM = query(collection(db, "monthlyRoutines"), where("athleteId", "==", athleteId));
         const snapM = await getDocs(qM);
         const loadedM: MonthlyRoutine[] = [];
         snapM.forEach(doc => loadedM.push({ id: doc.id, ...doc.data() } as MonthlyRoutine));
+
+        if (cancelled) return;
+        setTemplates(loadedT);
         setMonthlyRoutines(loadedM);
       } catch (e) {
+        if (cancelled) return;
         console.error(e);
         showToast('error', 'No se pudieron cargar las plantillas y rutinas.');
       }
     }
     fetchData();
+    return () => { cancelled = true; };
   }, [athlete?.coachId, athleteId, showToast]);
 
   const executeBatchInjection = async (template: RoutineTemplate | MonthlyRoutine, targetMeso: Mesocycle, mapping: Record<number, string>) => {
@@ -274,11 +289,30 @@ export default function AthleteDetailView({
     }
   };
 
+  // Si dos días de la plantilla apuntan al mismo día de la semana, uno se perdería en silencio
+  const validateDayMapping = (mapping: Record<number, string>): string | null => {
+    const seen = new Map<string, number>();
+    for (const [templateDay, weekDay] of Object.entries(mapping)) {
+      if (!weekDay) continue;
+      const previous = seen.get(weekDay);
+      if (previous !== undefined) {
+        return `El Día ${previous} y el Día ${templateDay} están asignados al mismo día de la semana.`;
+      }
+      seen.set(weekDay, Number(templateDay));
+    }
+    return null;
+  };
+
+  const [injectError, setInjectError] = useState<string | null>(null);
+
   const handleImportSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!importMeso || !selectedTemplate) return;
     const templateObj = templates.find(t => t.id === selectedTemplate) || monthlyRoutines.find(r => r.id === selectedTemplate);
     if (!templateObj) return;
+    const mappingError = validateDayMapping(dayMapping);
+    if (mappingError) { setInjectError(mappingError); return; }
+    setInjectError(null);
     await executeBatchInjection(templateObj, importMeso, dayMapping);
     setIsImportModalOpen(false); setSelectedTemplate("");
   };
@@ -289,6 +323,9 @@ export default function AthleteDetailView({
     const allMesos = athlete?.macrocycles?.flatMap(m => m.mesocycles || []) || [];
     const targetMeso = allMesos.find(m => m.id === globalTargetMesoId);
     if (!targetMeso) return;
+    const mappingError = validateDayMapping(dayMapping);
+    if (mappingError) { setInjectError(mappingError); return; }
+    setInjectError(null);
     await executeBatchInjection(globalImportRoutine, targetMeso, dayMapping);
     setGlobalImportRoutine(null); setGlobalTargetMesoId("");
   };
@@ -296,36 +333,110 @@ export default function AthleteDetailView({
   const [expandedWeek, setExpandedWeek] = useState<string | null>(null);
   const [isMacroModalOpen, setIsMacroModalOpen] = useState(false);
   const [macroFormData, setMacroFormData] = useState({ name: "", startDate: "", endDate: "" });
+  const [editingMacroId, setEditingMacroId] = useState<string | null>(null);
+  const [macroFormError, setMacroFormError] = useState<string | null>(null);
+
+  const openMacroModal = (macro?: Macrocycle) => {
+    setMacroFormError(null);
+    setEditingMacroId(macro?.id ?? null);
+    setMacroFormData(macro ? { name: macro.name, startDate: macro.startDate, endDate: macro.endDate } : { name: "", startDate: "", endDate: "" });
+    setIsMacroModalOpen(true);
+  };
+
+  const closeMacroModal = () => {
+    setIsMacroModalOpen(false);
+    setEditingMacroId(null);
+    setMacroFormError(null);
+  };
 
   const handleMacroSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!athleteId || isSubmitting) return;
+
+    const { startDate, endDate } = macroFormData;
+    if (endDate < startDate) {
+      setMacroFormError("La fecha de fin no puede ser anterior a la de inicio.");
+      return;
+    }
+    if (editingMacroId) {
+      // Al editar, el macrociclo no puede dejar afuera a sus mesociclos
+      const current = athlete?.macrocycles.find((m) => m.id === editingMacroId);
+      const outside = (current?.mesocycles || []).find((meso) => meso.startDate < startDate || meso.endDate > endDate);
+      if (outside) {
+        setMacroFormError(`El mesociclo "${outside.name}" quedaría fuera del rango. Ajustá sus fechas primero.`);
+        return;
+      }
+    }
+
+    setMacroFormError(null);
     setIsSubmitting(true);
     try {
-      await onCreateMacrocycle(athleteId, macroFormData);
+      if (editingMacroId) {
+        await onUpdateMacrocycle(editingMacroId, macroFormData);
+        showToast('success', 'Macrociclo actualizado.');
+      } else {
+        await onCreateMacrocycle(athleteId, macroFormData);
+        showToast('success', 'Macrociclo creado.');
+      }
       setMacroFormData({ name: "", startDate: "", endDate: "" });
-      setIsMacroModalOpen(false);
-      showToast('success', 'Macrociclo creado.');
+      closeMacroModal();
     } catch (e) {
-      showToast('error', 'No se pudo crear el macrociclo.');
+      setMacroFormError(editingMacroId ? "No se pudo actualizar el macrociclo." : "No se pudo crear el macrociclo.");
     } finally { setIsSubmitting(false); }
   };
 
   const [isMesoModalOpen, setIsMesoModalOpen] = useState(false);
   const [activeMacroId, setActiveMacroId] = useState<string | null>(null);
   const [mesoFormData, setMesoFormData] = useState({ name: "", phase: "Preparación General" as MesocyclePhase, startDate: "", endDate: "" });
+  const [editingMesoId, setEditingMesoId] = useState<string | null>(null);
+  const [mesoFormError, setMesoFormError] = useState<string | null>(null);
+
+  const openMesoModal = (macroId: string, meso?: Mesocycle) => {
+    setMesoFormError(null);
+    setActiveMacroId(macroId);
+    setEditingMesoId(meso?.id ?? null);
+    setMesoFormData(meso
+      ? { name: meso.name, phase: meso.phase, startDate: meso.startDate, endDate: meso.endDate }
+      : { name: "", phase: "Preparación General", startDate: "", endDate: "" });
+    setIsMesoModalOpen(true);
+  };
+
+  const closeMesoModal = () => {
+    setIsMesoModalOpen(false);
+    setActiveMacroId(null);
+    setEditingMesoId(null);
+    setMesoFormError(null);
+  };
 
   const handleMesoSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!activeMacroId || isSubmitting) return;
+
+    const { startDate, endDate } = mesoFormData;
+    const parentMacro = athlete?.macrocycles.find((m) => m.id === activeMacroId);
+    if (endDate < startDate) {
+      setMesoFormError("La fecha de fin no puede ser anterior a la de inicio.");
+      return;
+    }
+    if (parentMacro && (startDate < parentMacro.startDate || endDate > parentMacro.endDate)) {
+      setMesoFormError("El mesociclo tiene que estar dentro de las fechas de su macrociclo.");
+      return;
+    }
+
+    setMesoFormError(null);
     setIsSubmitting(true);
     try {
-      await onCreateMesocycle(activeMacroId, mesoFormData);
+      if (editingMesoId) {
+        await onUpdateMesocycle(editingMesoId, mesoFormData);
+        showToast('success', 'Mesociclo actualizado.');
+      } else {
+        await onCreateMesocycle(activeMacroId, mesoFormData);
+        showToast('success', 'Mesociclo creado.');
+      }
       setMesoFormData({ name: "", phase: "Preparación General", startDate: "", endDate: "" });
-      setIsMesoModalOpen(false); setActiveMacroId(null);
-      showToast('success', 'Mesociclo creado.');
+      closeMesoModal();
     } catch (e) {
-      showToast('error', 'No se pudo crear el mesociclo.');
+      setMesoFormError(editingMesoId ? "No se pudo actualizar el mesociclo." : "No se pudo crear el mesociclo.");
     } finally { setIsSubmitting(false); }
   };
 
@@ -420,6 +531,8 @@ export default function AthleteDetailView({
   };
 
   useEffect(() => {
+    // Descarta respuestas de un atleta anterior si el coach navega rápido entre perfiles
+    let cancelled = false;
     async function fetchMacrocycles() {
       if (!athleteId) return;
       setIsLoadingMacros(true);
@@ -429,24 +542,24 @@ export default function AthleteDetailView({
         const fetchedMacros: Macrocycle[] = [];
         snapshot.forEach((doc) => fetchedMacros.push(doc.data() as Macrocycle));
         fetchedMacros.sort((a, b) => new Date(a.startDate).getTime() - new Date(b.startDate).getTime());
+        if (cancelled) return;
         onLoadMacrocycles(athleteId, fetchedMacros);
       } catch (error) {
+        if (cancelled) return;
         console.error(error);
         showToast('error', 'No se pudo cargar la planificación del atleta.');
       }
-      finally { setIsLoadingMacros(false); }
+      finally { if (!cancelled) setIsLoadingMacros(false); }
     }
     fetchMacrocycles();
+    return () => { cancelled = true; };
   }, [athleteId]);
 
-  // ── Estado "atleta no encontrado" (antes quedaba en spinner infinito) ──────
-  // Heurística: si ya llegó la lista de atletas (length > 0) y no está este id,
-  // es que no existe / fue borrado — no que "todavía está cargando".
-  // Si tu lista de atletas tiene su propio flag de carga (ej. `athletesLoading`
-  // en el componente padre), pasalo como prop acá y reemplazá esta condición
-  // por `!athletesLoading && !athlete` para que sea 100% correcto también
-  // cuando un coach legítimamente tiene 0 atletas.
-  if (!athlete && athletes.length > 0) {
+  // ── Estado "atleta no encontrado" ───────────────────────────────────────────
+  // CoachApp muestra su skeleton hasta que llega la lista de atletas, así que
+  // cuando esta vista se renderiza la lista ya está cargada: si el id no está,
+  // el atleta no existe (o fue borrado) — no está "cargando".
+  if (!athlete) {
     return (
       <div className="p-12 max-w-lg mx-auto text-center flex flex-col items-center">
         <div className="w-16 h-16 rounded-2xl bg-[var(--ink-800)] flex items-center justify-center mb-5">
@@ -464,15 +577,9 @@ export default function AthleteDetailView({
     );
   }
 
-  if (!athlete) return (
-    <div className="p-12 text-center text-[var(--signal-500)] font-bold animate-pulse motion-reduce:animate-none flex flex-col items-center">
-      <Target size={40} className="mb-4 opacity-50" />
-      <p>Cargando perfil del atleta...</p>
-    </div>
-  );
-
   const fullName = athlete.firstName ? `${athlete.firstName} ${athlete.lastName}` : athlete.name;
-  const allMesosForDropdown = athlete.macrocycles?.flatMap(m => (m.mesocycles || []).map(meso => ({ ...meso, macroName: m.name }))) || [];
+  const allMesosForDropdown = athlete.macrocycles?.flatMap(m => sortMesosByStart(m.mesocycles).map(meso => ({ ...meso, macroName: m.name }))) || [];
+  const activeMacro = athlete.macrocycles?.find((m) => m.id === activeMacroId);
 
   return (
     <div className="p-4 sm:p-6 lg:p-8 max-w-6xl mx-auto space-y-8 animate-in fade-in duration-500">
@@ -514,7 +621,7 @@ export default function AthleteDetailView({
             </h2>
             <p className="text-sm font-medium text-[var(--mist-500)] mt-1">Estructurá los macrociclos y bloques diarios del atleta.</p>
           </div>
-          <button onClick={() => setIsMacroModalOpen(true)} className="w-full sm:w-auto bg-[var(--signal-500)] hover:bg-[var(--signal-600)] text-[var(--ink-950)] px-6 py-3.5 rounded-2xl text-sm font-display font-bold uppercase tracking-wide transition-all active:scale-95 flex items-center justify-center gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--signal-500)]">
+          <button onClick={() => openMacroModal()} className="w-full sm:w-auto bg-[var(--signal-500)] hover:bg-[var(--signal-600)] text-[var(--ink-950)] px-6 py-3.5 rounded-2xl text-sm font-display font-bold uppercase tracking-wide transition-all active:scale-95 flex items-center justify-center gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--signal-500)]">
             <Plus size={18} /> Nuevo Macrociclo
           </button>
         </div>
@@ -542,13 +649,16 @@ export default function AthleteDetailView({
                   <div>
                     <div className="flex items-center gap-3">
                       <h3 className="text-xl font-display font-bold text-[var(--mist-100)] tracking-tight">{macro.name}</h3>
+                      <button onClick={() => openMacroModal(macro)} aria-label={`Editar macrociclo ${macro.name}`} title="Editar Macrociclo" className="text-[var(--mist-500)] hover:text-[var(--signal-500)] hover:bg-[var(--signal-500)]/10 p-2 rounded-xl transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--signal-500)]">
+                        <Edit3 size={16} />
+                      </button>
                       <button onClick={() => setMacroToDelete(macro.id)} aria-label={`Eliminar macrociclo ${macro.name}`} title="Eliminar Macrociclo" className="text-[var(--mist-500)] hover:text-red-400 hover:bg-red-500/10 p-2 rounded-xl transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400">
                         <Trash2 size={16} />
                       </button>
                     </div>
                     <p className="text-sm font-medium text-[var(--mist-500)] mt-1">Del {macro.startDate.split('-').reverse().join('/')} al {macro.endDate.split('-').reverse().join('/')}</p>
                   </div>
-                  <button onClick={() => { setActiveMacroId(macro.id); setIsMesoModalOpen(true); }} className="w-full sm:w-auto text-[var(--signal-500)] font-bold bg-[var(--signal-500)]/10 hover:bg-[var(--signal-500)]/20 px-5 py-2.5 rounded-xl text-sm transition-colors active:scale-95 flex items-center justify-center gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--signal-500)]">
+                  <button onClick={() => openMesoModal(macro.id)} className="w-full sm:w-auto text-[var(--signal-500)] font-bold bg-[var(--signal-500)]/10 hover:bg-[var(--signal-500)]/20 px-5 py-2.5 rounded-xl text-sm transition-colors active:scale-95 flex items-center justify-center gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--signal-500)]">
                     <Plus size={16} /> Agregar Mesociclo
                   </button>
                 </div>
@@ -558,13 +668,16 @@ export default function AthleteDetailView({
                     <p className="text-sm text-[var(--mist-500)] italic text-center py-6">No hay ciclos menores creados todavía.</p>
                   ) : (
                     <div className="space-y-4">
-                      {macro.mesocycles.map((meso) => (
+                      {sortMesosByStart(macro.mesocycles).map((meso) => (
                         <div key={meso.id} className="border border-[var(--line-800)] rounded-2xl p-4 sm:p-5 bg-[var(--ink-850)] hover:border-[var(--mist-500)]/40 transition-colors">
                           <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4">
                             <div>
                               <div className="flex items-center gap-3">
                                 <h4 className="font-display font-bold text-lg text-[var(--mist-100)]">{meso.name}</h4>
                                 <span className="text-[10px] font-black uppercase tracking-wider bg-[var(--ink-800)] text-[var(--mist-300)] px-2 py-1 rounded-md">{meso.phase}</span>
+                                <button onClick={() => openMesoModal(macro.id, meso)} aria-label={`Editar mesociclo ${meso.name}`} title="Editar Mesociclo" className="text-[var(--mist-500)] hover:text-[var(--signal-500)] hover:bg-[var(--signal-500)]/10 p-1.5 rounded-lg transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--signal-500)]">
+                                  <Edit3 size={15} />
+                                </button>
                                 <button onClick={() => setMesoToDelete({ macroId: macro.id, mesoId: meso.id })} aria-label={`Eliminar mesociclo ${meso.name}`} title="Eliminar Mesociclo" className="text-[var(--mist-500)] hover:text-red-400 hover:bg-red-500/10 p-1.5 rounded-lg transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400">
                                   <Trash2 size={15} />
                                 </button>
@@ -573,7 +686,7 @@ export default function AthleteDetailView({
                             </div>
 
                             <div className="flex w-full lg:w-auto gap-2">
-                              <button onClick={() => { setImportMeso(meso); setIsImportModalOpen(true); }} className="flex-1 lg:flex-none text-center bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-colors active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400">
+                              <button onClick={() => { setImportMeso(meso); setInjectError(null); setIsImportModalOpen(true); }} className="flex-1 lg:flex-none text-center bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-colors active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400">
                                 Pegar Plantilla
                               </button>
                               <button
@@ -602,7 +715,7 @@ export default function AthleteDetailView({
                                       <div key={weekKey} className="border border-[var(--line-800)] bg-[var(--ink-900)] rounded-xl overflow-hidden transition-all">
                                         <button onClick={() => setExpandedWeek(isExpanded ? null : weekKey)} aria-expanded={isExpanded} className="w-full flex justify-between items-center p-4 hover:bg-[var(--ink-850)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--signal-500)] focus-visible:ring-inset">
                                           <span className="font-display font-bold text-[var(--mist-100)] text-sm md:text-base">{week.label}</span>
-                                          <span className="text-xs font-bold text-[var(--mist-500)] bg-[var(--ink-800)] px-2.5 py-1 rounded-lg">Del {week.days[0].date.slice(-5).replace('-', '/')} al {week.days[6].date.slice(-5).replace('-', '/')}</span>
+                                          <span className="text-xs font-bold text-[var(--mist-500)] bg-[var(--ink-800)] px-2.5 py-1 rounded-lg">Del {toDayMonth(week.days[0].date)} al {toDayMonth(week.days[6].date)}</span>
                                         </button>
 
                                         {isExpanded && (
@@ -615,7 +728,7 @@ export default function AthleteDetailView({
                                                 <div key={day.date} className={`flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 p-3.5 text-sm transition-colors ${isOutside ? 'bg-[var(--ink-900)]/40 opacity-50' : 'bg-[var(--ink-900)] hover:bg-[var(--ink-850)]'}`}>
                                                   <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-6 w-full sm:w-auto">
                                                     <span className="font-bold w-full sm:w-28 text-[var(--mist-100)] flex items-center justify-between sm:justify-start gap-2">
-                                                      {day.name} <span className="font-medium text-xs text-[var(--mist-500)]">{day.date.split('-').reverse().slice(0, 2).join('/')}</span>
+                                                      {day.name} <span className="font-medium text-xs text-[var(--mist-500)]">{toDayMonth(day.date)}</span>
                                                     </span>
                                                     {existingBlock ? (
                                                       <span className="text-[var(--signal-500)] font-black truncate bg-[var(--signal-500)]/10 px-2.5 py-0.5 rounded text-xs">{existingBlock.sessionType}</span>
@@ -623,9 +736,16 @@ export default function AthleteDetailView({
                                                       <span className="text-[var(--mist-500)] italic text-xs font-medium">Descanso / Libre</span>
                                                     )}
                                                   </div>
-                                                  <button onClick={() => handleOpenBlockModal(meso.id, day.date, day.name, existingBlock)} className={`w-full sm:w-auto text-center px-4 py-2 rounded-lg text-xs font-bold transition-all active:scale-95 border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--signal-500)] ${existingBlock ? 'bg-[var(--ink-800)] border-[var(--line-800)] text-[var(--mist-100)] hover:bg-[var(--line-800)]' : 'bg-[var(--signal-500)]/10 border-[var(--signal-500)]/20 text-[var(--signal-500)] hover:bg-[var(--signal-500)]/20'}`}>
-                                                    {existingBlock ? "Editar" : "Cargar Sesión"}
-                                                  </button>
+                                                  {isOutside && !existingBlock ? (
+                                                    // Fuera del rango del mesociclo: no se cargan sesiones nuevas
+                                                    <button type="button" disabled className="w-full sm:w-auto text-center px-4 py-2 rounded-lg text-xs font-bold border bg-[var(--ink-800)] border-[var(--line-800)] text-[var(--mist-500)] cursor-not-allowed">
+                                                      Fuera del ciclo
+                                                    </button>
+                                                  ) : (
+                                                    <button onClick={() => handleOpenBlockModal(meso.id, day.date, day.name, existingBlock)} className={`w-full sm:w-auto text-center px-4 py-2 rounded-lg text-xs font-bold transition-all active:scale-95 border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--signal-500)] ${existingBlock ? 'bg-[var(--ink-800)] border-[var(--line-800)] text-[var(--mist-100)] hover:bg-[var(--line-800)]' : 'bg-[var(--signal-500)]/10 border-[var(--signal-500)]/20 text-[var(--signal-500)] hover:bg-[var(--signal-500)]/20'}`}>
+                                                      {existingBlock ? "Editar" : "Cargar Sesión"}
+                                                    </button>
+                                                  )}
                                                 </div>
                                               )
                                             })}
@@ -657,6 +777,7 @@ export default function AthleteDetailView({
           monthlyRoutines={monthlyRoutines}
           onInjectRequest={(routine: MonthlyRoutine) => {
             setGlobalImportRoutine(routine);
+            setInjectError(null);
             setGlobalTargetMesoId("");
             setDayMapping({});
           }}
@@ -694,6 +815,11 @@ export default function AthleteDetailView({
               <p className="text-sm font-medium text-[var(--mist-500)] mb-6">Pegá una rutina directamente al calendario de este mesociclo.</p>
 
               <form onSubmit={handleImportSubmit} className="space-y-5">
+                {injectError && (
+                  <div role="alert" className="flex items-center gap-2.5 bg-red-500/10 border border-red-500/30 text-red-400 text-sm font-semibold rounded-xl px-4 py-3">
+                    <AlertCircle size={16} className="shrink-0" /> {injectError}
+                  </div>
+                )}
                 <select required value={selectedTemplate} onChange={(e) => { setSelectedTemplate(e.target.value); setDayMapping({}); }} className="w-full bg-[var(--ink-800)] border border-[var(--line-800)] text-[var(--mist-100)] font-bold rounded-xl p-3.5 outline-none focus:ring-4 focus:ring-[var(--signal-500)]/15 focus:border-[var(--signal-500)] transition-all cursor-pointer">
                   <option value="">Seleccionar Rutina...</option>
                   <optgroup label="Historial del Atleta">
@@ -710,7 +836,7 @@ export default function AthleteDetailView({
                     {(templates.find(t => t.id === selectedTemplate) || monthlyRoutines.find(r => r.id === selectedTemplate))?.days.map(d => (
                       <div key={d.dayNumber} className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-2 border-b border-[var(--line-800)] pb-3 last:border-0 last:pb-0">
                         <label htmlFor={`day-map-${d.dayNumber}`} className="text-sm font-bold text-[var(--mist-100)]">Día {d.dayNumber}</label>
-                        <select id={`day-map-${d.dayNumber}`} required value={dayMapping[d.dayNumber] || ""} onChange={(e) => setDayMapping({ ...dayMapping, [d.dayNumber]: e.target.value })} className="bg-[var(--ink-900)] border border-[var(--line-800)] rounded-xl p-2 text-sm font-bold text-[var(--mist-100)] w-full sm:w-36 outline-none focus:ring-2 focus:ring-[var(--signal-500)] transition-all">
+                        <select id={`day-map-${d.dayNumber}`} required value={dayMapping[d.dayNumber] || ""} onChange={(e) => { setDayMapping({ ...dayMapping, [d.dayNumber]: e.target.value }); setInjectError(null); }} className="bg-[var(--ink-900)] border border-[var(--line-800)] rounded-xl p-2 text-sm font-bold text-[var(--mist-100)] w-full sm:w-36 outline-none focus:ring-2 focus:ring-[var(--signal-500)] transition-all">
                           <option value="">Elegir...</option><option value="1">Lunes</option><option value="2">Martes</option><option value="3">Miércoles</option><option value="4">Jueves</option><option value="5">Viernes</option><option value="6">Sábado</option><option value="0">Domingo</option>
                         </select>
                       </div>
@@ -738,17 +864,28 @@ export default function AthleteDetailView({
               <p className="text-sm font-medium text-[var(--mist-500)] mb-6">Elegí el destino en el calendario para volcar esta rutina mensual.</p>
 
               <form onSubmit={handleGlobalImportSubmit} className="space-y-5">
-                <div>
-                  <label htmlFor="target-meso" className="block text-xs font-bold text-[var(--mist-500)] uppercase tracking-wider mb-2">Mesociclo Destino</label>
-                  <select id="target-meso" required value={globalTargetMesoId} onChange={(e) => { setGlobalTargetMesoId(e.target.value); setDayMapping({}); }} className="w-full bg-[var(--ink-800)] border border-[var(--line-800)] text-[var(--mist-100)] font-bold rounded-xl p-3.5 outline-none focus:ring-4 focus:ring-[var(--signal-500)]/15 focus:border-[var(--signal-500)] transition-all cursor-pointer">
-                    <option value="">Seleccionar Mesociclo...</option>
-                    {allMesosForDropdown.map(meso => (
-                      <option key={meso.id} value={meso.id}>
-                        {meso.macroName}: {meso.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+                {injectError && (
+                  <div role="alert" className="flex items-center gap-2.5 bg-red-500/10 border border-red-500/30 text-red-400 text-sm font-semibold rounded-xl px-4 py-3">
+                    <AlertCircle size={16} className="shrink-0" /> {injectError}
+                  </div>
+                )}
+                {allMesosForDropdown.length === 0 ? (
+                  <div role="status" className="flex items-center gap-2.5 bg-[var(--ink-800)] border border-[var(--line-800)] text-[var(--mist-300)] text-sm font-semibold rounded-xl px-4 py-3">
+                    <AlertCircle size={16} className="shrink-0 text-[var(--signal-500)]" /> Primero creá un mesociclo para poder inyectar esta rutina.
+                  </div>
+                ) : (
+                  <div>
+                    <label htmlFor="target-meso" className="block text-xs font-bold text-[var(--mist-500)] uppercase tracking-wider mb-2">Mesociclo Destino</label>
+                    <select id="target-meso" required value={globalTargetMesoId} onChange={(e) => { setGlobalTargetMesoId(e.target.value); setDayMapping({}); setInjectError(null); }} className="w-full bg-[var(--ink-800)] border border-[var(--line-800)] text-[var(--mist-100)] font-bold rounded-xl p-3.5 outline-none focus:ring-4 focus:ring-[var(--signal-500)]/15 focus:border-[var(--signal-500)] transition-all cursor-pointer">
+                      <option value="">Seleccionar Mesociclo...</option>
+                      {allMesosForDropdown.map(meso => (
+                        <option key={meso.id} value={meso.id}>
+                          {meso.macroName}: {meso.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
 
                 {globalTargetMesoId && (
                   <div className="bg-[var(--ink-800)] p-5 rounded-2xl border border-[var(--line-800)] space-y-4">
@@ -756,7 +893,7 @@ export default function AthleteDetailView({
                     {globalImportRoutine.days.map(d => (
                       <div key={d.dayNumber} className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-2 border-b border-[var(--line-800)] pb-3 last:border-0 last:pb-0">
                         <label htmlFor={`gday-map-${d.dayNumber}`} className="text-xs font-bold text-[var(--mist-100)] truncate w-32" title={d.sessionType}>Día {d.dayNumber}: {d.sessionType}</label>
-                        <select id={`gday-map-${d.dayNumber}`} required value={dayMapping[d.dayNumber] || ""} onChange={(e) => setDayMapping({ ...dayMapping, [d.dayNumber]: e.target.value })} className="bg-[var(--ink-900)] border border-[var(--line-800)] rounded-xl p-2 text-sm font-bold text-[var(--mist-100)] w-full sm:w-36 outline-none focus:ring-2 focus:ring-[var(--signal-500)] transition-all">
+                        <select id={`gday-map-${d.dayNumber}`} required value={dayMapping[d.dayNumber] || ""} onChange={(e) => { setDayMapping({ ...dayMapping, [d.dayNumber]: e.target.value }); setInjectError(null); }} className="bg-[var(--ink-900)] border border-[var(--line-800)] rounded-xl p-2 text-sm font-bold text-[var(--mist-100)] w-full sm:w-36 outline-none focus:ring-2 focus:ring-[var(--signal-500)] transition-all">
                           <option value="">Día...</option><option value="1">Lunes</option><option value="2">Martes</option><option value="3">Miércoles</option><option value="4">Jueves</option><option value="5">Viernes</option><option value="6">Sábado</option><option value="0">Domingo</option>
                         </select>
                       </div>
@@ -777,11 +914,16 @@ export default function AthleteDetailView({
       )}
 
       {isMacroModalOpen && (
-        <ModalShell onClose={() => setIsMacroModalOpen(false)} labelledBy="macro-modal-title">
+        <ModalShell onClose={closeMacroModal} labelledBy="macro-modal-title">
           {(close) => (
             <>
-              <h2 id="macro-modal-title" className="text-2xl font-display font-bold text-[var(--mist-100)] mb-6 uppercase tracking-wide">Nuevo Macrociclo</h2>
+              <h2 id="macro-modal-title" className="text-2xl font-display font-bold text-[var(--mist-100)] mb-6 uppercase tracking-wide">{editingMacroId ? "Editar Macrociclo" : "Nuevo Macrociclo"}</h2>
               <form onSubmit={handleMacroSubmit} className="space-y-5">
+                {macroFormError && (
+                  <div role="alert" className="flex items-center gap-2.5 bg-red-500/10 border border-red-500/30 text-red-400 text-sm font-semibold rounded-xl px-4 py-3">
+                    <AlertCircle size={16} className="shrink-0" /> {macroFormError}
+                  </div>
+                )}
                 <div>
                   <label htmlFor="macro-name" className="block text-xs font-bold text-[var(--mist-500)] uppercase tracking-wider mb-2">Nombre del Bloque</label>
                   <input id="macro-name" type="text" required placeholder="Ej: Torneo Apertura" value={macroFormData.name} onChange={(e) => setMacroFormData({ ...macroFormData, name: e.target.value })} className="w-full bg-[var(--ink-800)] border border-[var(--line-800)] text-[var(--mist-100)] font-bold rounded-xl p-3.5 focus:ring-4 focus:ring-[var(--signal-500)]/15 focus:border-[var(--signal-500)] outline-none transition-all placeholder:text-[var(--mist-500)]" />
@@ -793,7 +935,7 @@ export default function AthleteDetailView({
                   </div>
                   <div>
                     <label htmlFor="macro-end" className="block text-xs font-bold text-[var(--mist-500)] uppercase tracking-wider mb-2">Fin</label>
-                    <input id="macro-end" type="date" required value={macroFormData.endDate} onChange={(e) => setMacroFormData({ ...macroFormData, endDate: e.target.value })} className="w-full bg-[var(--ink-800)] border border-[var(--line-800)] text-[var(--mist-100)] font-bold rounded-xl p-3.5 focus:ring-4 focus:ring-[var(--signal-500)]/15 focus:border-[var(--signal-500)] outline-none transition-all" />
+                    <input id="macro-end" type="date" required min={macroFormData.startDate || undefined} value={macroFormData.endDate} onChange={(e) => setMacroFormData({ ...macroFormData, endDate: e.target.value })} className="w-full bg-[var(--ink-800)] border border-[var(--line-800)] text-[var(--mist-100)] font-bold rounded-xl p-3.5 focus:ring-4 focus:ring-[var(--signal-500)]/15 focus:border-[var(--signal-500)] outline-none transition-all" />
                   </div>
                 </div>
                 <div className="flex gap-3 pt-4">
@@ -809,11 +951,16 @@ export default function AthleteDetailView({
       )}
 
       {isMesoModalOpen && (
-        <ModalShell onClose={() => { setIsMesoModalOpen(false); setActiveMacroId(null); }} labelledBy="meso-modal-title">
+        <ModalShell onClose={closeMesoModal} labelledBy="meso-modal-title">
           {(close) => (
             <>
-              <h2 id="meso-modal-title" className="text-2xl font-display font-bold text-[var(--mist-100)] mb-6 uppercase tracking-wide">Agregar Mesociclo</h2>
+              <h2 id="meso-modal-title" className="text-2xl font-display font-bold text-[var(--mist-100)] mb-6 uppercase tracking-wide">{editingMesoId ? "Editar Mesociclo" : "Agregar Mesociclo"}</h2>
               <form onSubmit={handleMesoSubmit} className="space-y-5">
+                {mesoFormError && (
+                  <div role="alert" className="flex items-center gap-2.5 bg-red-500/10 border border-red-500/30 text-red-400 text-sm font-semibold rounded-xl px-4 py-3">
+                    <AlertCircle size={16} className="shrink-0" /> {mesoFormError}
+                  </div>
+                )}
                 <div>
                   <label htmlFor="meso-name" className="block text-xs font-bold text-[var(--mist-500)] uppercase tracking-wider mb-2">Nombre del Ciclo</label>
                   <input id="meso-name" type="text" required placeholder="Ej: Fuerza Base I" value={mesoFormData.name} onChange={(e) => setMesoFormData({ ...mesoFormData, name: e.target.value })} className="w-full bg-[var(--ink-800)] border border-[var(--line-800)] text-[var(--mist-100)] font-bold rounded-xl p-3.5 focus:ring-4 focus:ring-[var(--signal-500)]/15 focus:border-[var(--signal-500)] outline-none transition-all placeholder:text-[var(--mist-500)]" />
@@ -831,11 +978,11 @@ export default function AthleteDetailView({
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label htmlFor="meso-start" className="block text-xs font-bold text-[var(--mist-500)] uppercase tracking-wider mb-2">Inicio</label>
-                    <input id="meso-start" type="date" required value={mesoFormData.startDate} onChange={(e) => setMesoFormData({ ...mesoFormData, startDate: e.target.value })} className="w-full bg-[var(--ink-800)] border border-[var(--line-800)] text-[var(--mist-100)] font-bold rounded-xl p-3.5 focus:ring-4 focus:ring-[var(--signal-500)]/15 focus:border-[var(--signal-500)] outline-none transition-all" />
+                    <input id="meso-start" type="date" required min={activeMacro?.startDate} max={activeMacro?.endDate} value={mesoFormData.startDate} onChange={(e) => setMesoFormData({ ...mesoFormData, startDate: e.target.value })} className="w-full bg-[var(--ink-800)] border border-[var(--line-800)] text-[var(--mist-100)] font-bold rounded-xl p-3.5 focus:ring-4 focus:ring-[var(--signal-500)]/15 focus:border-[var(--signal-500)] outline-none transition-all" />
                   </div>
                   <div>
                     <label htmlFor="meso-end" className="block text-xs font-bold text-[var(--mist-500)] uppercase tracking-wider mb-2">Fin</label>
-                    <input id="meso-end" type="date" required value={mesoFormData.endDate} onChange={(e) => setMesoFormData({ ...mesoFormData, endDate: e.target.value })} className="w-full bg-[var(--ink-800)] border border-[var(--line-800)] text-[var(--mist-100)] font-bold rounded-xl p-3.5 focus:ring-4 focus:ring-[var(--signal-500)]/15 focus:border-[var(--signal-500)] outline-none transition-all" />
+                    <input id="meso-end" type="date" required min={mesoFormData.startDate || activeMacro?.startDate} max={activeMacro?.endDate} value={mesoFormData.endDate} onChange={(e) => setMesoFormData({ ...mesoFormData, endDate: e.target.value })} className="w-full bg-[var(--ink-800)] border border-[var(--line-800)] text-[var(--mist-100)] font-bold rounded-xl p-3.5 focus:ring-4 focus:ring-[var(--signal-500)]/15 focus:border-[var(--signal-500)] outline-none transition-all" />
                   </div>
                 </div>
                 <div className="flex gap-3 pt-4">
@@ -1051,7 +1198,7 @@ export default function AthleteDetailView({
         </ModalShell>
       )}
 
-      <Toast toast={toast} onDismiss={() => setToast(null)} />
+      <Toast toast={toast} onDismiss={dismissToast} />
 
     </div>
   );

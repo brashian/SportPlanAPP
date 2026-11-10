@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
-import { Users, Search, Plus, X, ChevronRight, Activity, Loader2 } from "lucide-react";
+import { Users, Search, Plus, X, ChevronRight, Activity, Loader2, AlertCircle } from "lucide-react";
 import type { Athlete } from "../../types/models";
 import { athleteFullName } from "../../types/models";
 import ModalShell from "../shared/ModalShell";
@@ -15,6 +15,7 @@ export default function AthleteListView({ athletes, onCreateAthlete }: Props) {
   const [searchTerm, setSearchTerm] = useState("");
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
 
   const [formData, setFormData] = useState({
     firstName: "", lastName: "", sport: "", email: "", phone: "",
@@ -29,16 +30,25 @@ export default function AthleteListView({ athletes, onCreateAthlete }: Props) {
     });
   }, [athletes, searchTerm]);
 
+  const closeModal = () => {
+    setIsModalOpen(false);
+    setFormError(null);
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setFormError(null);
     setIsSubmitting(true);
     try {
       const nameCombo = `${formData.firstName} ${formData.lastName}`.trim();
       await onCreateAthlete({
         name: nameCombo, sport: formData.sport, email: formData.email, phone: formData.phone,
       });
-      setIsModalOpen(false);
+      closeModal();
       setFormData({ firstName: "", lastName: "", sport: "", email: "", phone: "" });
+    } catch {
+      // Se conservan los datos cargados para que el coach pueda reintentar
+      setFormError("No se pudo registrar al atleta. Revisá tu conexión y probá de nuevo.");
     } finally {
       setIsSubmitting(false);
     }
@@ -139,7 +149,7 @@ export default function AthleteListView({ athletes, onCreateAthlete }: Props) {
 
       {/* Modal Crear Atleta */}
       {isModalOpen && (
-        <ModalShell onClose={() => setIsModalOpen(false)} labelledBy="new-athlete-title" panelClassName="max-w-md p-8">
+        <ModalShell onClose={closeModal} labelledBy="new-athlete-title" panelClassName="max-w-md p-8">
           {(close) => (
             <>
               <div className="flex justify-between items-center mb-6">
@@ -157,6 +167,11 @@ export default function AthleteListView({ athletes, onCreateAthlete }: Props) {
               </div>
 
               <form onSubmit={handleSubmit} className="space-y-5">
+                {formError && (
+                  <div role="alert" className="flex items-center gap-2.5 bg-red-500/10 border border-red-500/30 text-red-400 text-sm font-semibold rounded-xl px-4 py-3">
+                    <AlertCircle size={16} className="shrink-0" /> {formError}
+                  </div>
+                )}
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label htmlFor="af-firstname" className="block text-xs font-bold text-[var(--mist-500)] uppercase tracking-wider mb-2">Nombre *</label>
