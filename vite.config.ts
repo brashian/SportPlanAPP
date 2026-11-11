@@ -9,7 +9,7 @@ export default defineConfig({
     // Los datos sin conexión los cubre la caché persistente de Firestore (src/firebase.ts).
     VitePWA({
       registerType: "autoUpdate",
-      includeAssets: ["logo.svg"],
+      includeAssets: ["logo.svg", "apple-touch-icon-180x180.png"],
       manifest: {
         name: "SportPlan",
         short_name: "SportPlan",
@@ -19,7 +19,12 @@ export default defineConfig({
         display: "standalone",
         background_color: "#0A0E14",
         theme_color: "#0A0E14",
+        // PNG generados con `npm run generate-pwa-assets` (scripts/generate-icons.mjs)
         icons: [
+          { src: "/pwa-64x64.png", sizes: "64x64", type: "image/png" },
+          { src: "/pwa-192x192.png", sizes: "192x192", type: "image/png" },
+          { src: "/pwa-512x512.png", sizes: "512x512", type: "image/png" },
+          { src: "/maskable-icon-512x512.png", sizes: "512x512", type: "image/png", purpose: "maskable" },
           { src: "/logo.svg", sizes: "any", type: "image/svg+xml", purpose: "any" },
         ],
       },

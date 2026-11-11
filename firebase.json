@@ -8,7 +8,7 @@
     ],
     "headers": [
       {
-        "source": "@(/index.html|**/!(*.*))",
+        "regex": "^/(index\\.html)?$|^/[^.]*$",
         "headers": [{ "key": "Cache-Control", "value": "no-cache" }]
       },
       {
