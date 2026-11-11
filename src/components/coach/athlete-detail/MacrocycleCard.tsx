@@ -1,11 +1,12 @@
 import { Edit3, Plus, Trash2 } from "lucide-react";
-import type { DailyBlock, Macrocycle, Mesocycle } from "../../../types/models";
+import type { DailyBlock, Macrocycle, Mesocycle, SessionFeedback } from "../../../types/models";
 import MesocycleCard from "./MesocycleCard";
 import { sortMesosByStart, toDayMonthYear } from "./dateHelpers";
 
 interface MacrocycleCardProps {
   macro: Macrocycle;
   blocksByMesocycle: Record<string, DailyBlock[]>;
+  feedbackByDate: Record<string, SessionFeedback>;
   activeViewMesoId: string | null;
   isLoadingBlocks: boolean;
   onEdit: () => void;
@@ -16,12 +17,15 @@ interface MacrocycleCardProps {
   onPasteTemplate: (meso: Mesocycle) => void;
   onToggleCalendar: (meso: Mesocycle) => void;
   onOpenDay: (meso: Mesocycle, date: string, dayName: string, existingBlock?: DailyBlock) => void;
+  athleteName: string;
+  onPdfError: (message: string) => void;
 }
 
 // Tarjeta de un macrociclo con su lista de mesociclos (ordenados por fecha)
 export default function MacrocycleCard({
-  macro, blocksByMesocycle, activeViewMesoId, isLoadingBlocks,
+  macro, blocksByMesocycle, feedbackByDate, activeViewMesoId, isLoadingBlocks,
   onEdit, onDelete, onAddMeso, onEditMeso, onDeleteMeso, onPasteTemplate, onToggleCalendar, onOpenDay,
+  athleteName, onPdfError,
 }: MacrocycleCardProps) {
   return (
     <div className="border border-[var(--line-800)] bg-[var(--ink-900)] rounded-3xl overflow-hidden transition-all">
@@ -53,6 +57,7 @@ export default function MacrocycleCard({
                 key={meso.id}
                 meso={meso}
                 blocks={blocksByMesocycle[meso.id] || []}
+                feedbackByDate={feedbackByDate}
                 isCalendarOpen={activeViewMesoId === meso.id}
                 isLoadingBlocks={isLoadingBlocks}
                 onEdit={() => onEditMeso(meso)}
@@ -60,6 +65,8 @@ export default function MacrocycleCard({
                 onPasteTemplate={() => onPasteTemplate(meso)}
                 onToggleCalendar={() => onToggleCalendar(meso)}
                 onOpenDay={(date, dayName, existingBlock) => onOpenDay(meso, date, dayName, existingBlock)}
+                athleteName={athleteName}
+                onPdfError={onPdfError}
               />
             ))}
           </div>

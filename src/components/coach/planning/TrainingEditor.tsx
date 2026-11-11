@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { ArrowLeft, Save, Clock, Flame, Eraser, PenTool, Minus, Circle, X as XIcon } from 'lucide-react';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
-import { db } from '../../../firebase';
+import { auth, db } from '../../../firebase';
 import { usePlanningStore } from '../../../store/usePlanningStore';
 import ReactQuill from 'react-quill';
 import 'react-quill/dist/quill.snow.css';
@@ -155,7 +155,8 @@ export default function TrainingEditor() {
     try {
       const docRef = doc(db, "clubTrainings", sessionId);
       await setDoc(docRef, {
-        ...formData, teamId: activeCategoryId, date: selectedSession?.date.split('T')[0], updatedAt: new Date().toISOString()
+        // coachId: dueño del documento para las reglas de Firestore
+        ...formData, teamId: activeCategoryId, coachId: auth.currentUser?.uid, date: selectedSession?.date.split('T')[0], updatedAt: new Date().toISOString()
       }, { merge: true });
       showToast('success', 'Entrenamiento guardado.');
     } catch (error) {

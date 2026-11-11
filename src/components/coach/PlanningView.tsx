@@ -6,6 +6,7 @@ import SeasonCalendar from './planning/SeasonCalendar';
 import { Skeleton } from '../ui/Skeleton';
 import { lazyWithRetry } from '../../utils/lazyWithRetry';
 import Toast, { type ToastState } from '../shared/Toast';
+import { migrateClubTrainingsOwner } from './planning/clubTrainingsMigration';
 import { Club } from '../../types/planning';
 import { ChevronDown, Users, Plus, Menu, X, Shield, Pencil, Trash2 } from 'lucide-react';
 
@@ -59,16 +60,21 @@ export default function PlanningView() {
     async function fetchClubs() {
       const coachId = auth.currentUser?.uid;
       if (!coachId) { setIsLoadingClubs(false); return; }
+      // Le agrega coachId a los entrenamientos viejos de sus categorías (ver clubTrainingsMigration)
+      let resolveCategoryIds: (ids: string[]) => void = () => {};
+      migrateClubTrainingsOwner(coachId, new Promise((resolve) => { resolveCategoryIds = resolve; }));
       try {
         const q = query(collection(db, "clubs"), where("coachId", "==", coachId));
         const snap = await getDocs(q);
         const loaded: Club[] = [];
         snap.forEach(d => loaded.push({ id: d.id, ...d.data() } as Club));
         setClubs(loaded);
+        resolveCategoryIds(loaded.flatMap((club) => (club.categories || []).map((cat) => cat.id)));
       } catch (error) {
         console.error("Error al traer los clubes:", error);
         showToast('error', 'No se pudieron cargar los clubes.');
       } finally {
+        resolveCategoryIds([]); // sin efecto si ya se resolvió arriba
         setIsLoadingClubs(false);
       }
     }

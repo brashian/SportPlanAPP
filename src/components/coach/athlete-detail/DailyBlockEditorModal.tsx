@@ -2,8 +2,9 @@ import type { Dispatch, FormEvent, SetStateAction } from "react";
 import ReactQuill from "react-quill";
 import "react-quill/dist/quill.snow.css";
 import { Calendar, Dumbbell, Loader2, Plus, X } from "lucide-react";
-import type { VolumeLevel } from "../../../types/models";
+import type { SessionFeedback, VolumeLevel } from "../../../types/models";
 import ModalShell from "../../shared/ModalShell";
+import FeedbackPanel from "./FeedbackPanel";
 import type { BlockContext, BlockFormData } from "./types";
 
 // Colores por grupo de bloque (superserie/circuito), adaptados a fondo oscuro:
@@ -32,10 +33,12 @@ interface DailyBlockEditorModalProps {
   isSubmitting: boolean;
   onSubmit: (e: FormEvent) => void;
   onClose: () => void;
+  // Lo que el atleta contó sobre esta sesión (solo lectura)
+  feedback?: SessionFeedback;
 }
 
 // Editor de la sesión de un día: enfoque, volumen, ejercicios y notas
-export default function DailyBlockEditorModal({ context, formData, setFormData, isSubmitting, onSubmit, onClose }: DailyBlockEditorModalProps) {
+export default function DailyBlockEditorModal({ context, formData, setFormData, isSubmitting, onSubmit, onClose, feedback }: DailyBlockEditorModalProps) {
   return (
     <ModalShell
       onClose={onClose}
@@ -59,6 +62,7 @@ export default function DailyBlockEditorModal({ context, formData, setFormData, 
           </div>
 
           <div className="p-4 sm:p-8 overflow-y-auto bg-[var(--ink-950)] flex-1 space-y-8 custom-scrollbar">
+            {feedback && <FeedbackPanel feedback={feedback} />}
             <form id="blockForm" onSubmit={onSubmit} className="space-y-8">
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 bg-[var(--ink-900)] p-6 rounded-2xl border border-[var(--line-800)]">

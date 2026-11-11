@@ -2,6 +2,8 @@ import React, { useState } from 'react';
 import type { MonthlyRoutine, RoutineTemplate, TemplateDay } from '../../types/models';
 import { FileText, Import, Plus, X, Dumbbell, Trash2, CheckCircle2, History, Edit3, Save, AlertTriangle, AlertCircle, Loader2 } from 'lucide-react';
 import ModalShell from '../shared/ModalShell';
+import PdfButton from '../shared/pdf/PdfButton';
+import { templateDaysToPdfSection } from '../shared/pdf/pdfMappers';
 
 interface Props {
   athleteId: string;
@@ -12,10 +14,14 @@ interface Props {
   onSaveAthleteRoutine: (routine: Omit<MonthlyRoutine, 'id' | 'createdAt'>) => Promise<MonthlyRoutine>;
   onUpdateAthleteRoutine?: (routineId: string, data: Partial<MonthlyRoutine>) => Promise<void>;
   onDeleteAthleteRoutine?: (routineId: string) => Promise<void>;
+  // Para el encabezado del PDF y el aviso si falla
+  athleteName?: string;
+  onPdfError?: (message: string) => void;
 }
 
 export default function MonthlyRoutineManager({
-  athleteId, coachId, templates, monthlyRoutines, onInjectRequest, onSaveAthleteRoutine, onUpdateAthleteRoutine, onDeleteAthleteRoutine
+  athleteId, coachId, templates, monthlyRoutines, onInjectRequest, onSaveAthleteRoutine, onUpdateAthleteRoutine, onDeleteAthleteRoutine,
+  athleteName, onPdfError,
 }: Props) {
   const [selectedTemplate, setSelectedTemplate] = useState<string>("");
   const [isCreating, setIsCreating] = useState(false);
@@ -226,6 +232,19 @@ export default function MonthlyRoutineManager({
                   >
                     <Import size={14} /> Inyectar
                   </button>
+                  <PdfButton
+                    label=""
+                    ariaLabel={`Descargar rutina ${r.monthName} en PDF`}
+                    fileName={`${athleteName ?? "Rutina"}_${r.monthName}`}
+                    getDocument={() => ({
+                      title: r.monthName,
+                      subtitle: `Rutina · ${r.days.length} ${r.days.length === 1 ? "día" : "días"}`,
+                      athleteName,
+                      sections: [templateDaysToPdfSection(r.days)],
+                    })}
+                    onError={onPdfError}
+                    className="p-2.5 bg-[var(--ink-800)] hover:bg-[var(--line-800)] text-[var(--mist-300)] hover:text-[var(--mist-100)] rounded-xl flex items-center justify-center transition-colors disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--signal-500)]"
+                  />
                   <button
                     onClick={() => setRoutineToDelete(r)}
                     aria-label={`Eliminar rutina ${r.monthName}`}

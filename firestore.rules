@@ -1,0 +1,131 @@
+rules_version = '2';
+
+// Reglas de seguridad de SportPlan.
+// Se publican con: firebase deploy --only firestore:rules
+// Se prueban con:  npm run test:rules (emulador de Firestore)
+//
+// Idea general: cada dato tiene un dueño (coachId) o pertenece a un atleta
+// (athleteId → athletes/{id}.coachId / .email). Todo lo que no está listado
+// acá queda denegado.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ── Helpers ──────────────────────────────────────────────────────────────
+    function isAuth() { return request.auth != null; }
+    function me() { return request.auth.uid; }
+    function myEmail() { return request.auth.token.email; }
+
+    function athleteData(athleteId) {
+      return get(/databases/$(database)/documents/athletes/$(athleteId)).data;
+    }
+    // El usuario es el coach dueño de ese atleta
+    function isCoachOf(athleteId) { return athleteData(athleteId).coachId == me(); }
+    // El usuario es ese atleta (su email de login coincide con el de la ficha)
+    function isAthleteSelf(athleteId) { return athleteData(athleteId).email == myEmail(); }
+
+    // Coach habilitado: rol asignado por el administrador en users/{uid}
+    function isApprovedCoach() {
+      let u = get(/databases/$(database)/documents/users/$(me())).data;
+      return u.role == 'coach' && u.get('isApproved', true) != false;
+    }
+
+    // ── Usuarios y coaches ───────────────────────────────────────────────────
+    // users/{uid} define el rol: solo lo edita el administrador desde la consola
+    match /users/{userId} {
+      allow read: if isAuth() && me() == userId;
+      allow write: if false;
+    }
+
+    // Registro de coach: se crea pendiente de aprobación; aprobarlo es del administrador
+    match /coaches/{coachId} {
+      allow read: if isAuth() && me() == coachId;
+      allow create: if isAuth() && me() == coachId
+        && request.resource.data.role == 'coach'
+        && request.resource.data.isApproved == false;
+      allow update, delete: if false;
+    }
+
+    // ── Atletas ──────────────────────────────────────────────────────────────
+    match /athletes/{athleteId} {
+      allow read: if isAuth() && (resource.data.coachId == me() || resource.data.email == myEmail());
+      allow create: if isAuth() && request.resource.data.coachId == me() && isApprovedCoach();
+      allow update: if isAuth() && resource.data.coachId == me() && request.resource.data.coachId == me();
+      allow delete: if isAuth() && resource.data.coachId == me();
+    }
+
+    // ── Planificación del atleta ─────────────────────────────────────────────
+    match /macrocycles/{macroId} {
+      allow read: if isAuth() && (isCoachOf(resource.data.athleteId) || isAthleteSelf(resource.data.athleteId));
+      allow create: if isAuth() && isCoachOf(request.resource.data.athleteId);
+      allow update: if isAuth() && isCoachOf(resource.data.athleteId)
+        && request.resource.data.athleteId == resource.data.athleteId;
+      allow delete: if isAuth() && isCoachOf(resource.data.athleteId);
+    }
+
+    // Bloques diarios de un mesociclo. Los documentos anteriores a estas reglas
+    // no tienen coachId ("legacy"): siguen abiertos a usuarios con sesión hasta que
+    // la app les agrega el dueño (pasa sola cuando el coach abre ese calendario).
+    match /mesocycleBlocks/{mesoId} {
+      function isLegacy() { return !('coachId' in resource.data); }
+
+      // resource == null: el mesociclo todavía no tiene bloques (la app igual lo consulta)
+      allow read: if isAuth() && (resource == null || isLegacy()
+        || resource.data.coachId == me() || isAthleteSelf(resource.data.athleteId));
+      allow create: if isAuth() && request.resource.data.coachId == me()
+        && isCoachOf(request.resource.data.athleteId);
+      allow update: if isAuth() && (isLegacy() || resource.data.coachId == me())
+        && request.resource.data.coachId == me()
+        && isCoachOf(request.resource.data.athleteId);
+      // resource == null: borrar en lote un mesociclo que nunca tuvo bloques
+      allow delete: if isAuth() && (resource == null || isLegacy() || resource.data.coachId == me());
+    }
+
+    match /routineTemplates/{templateId} {
+      allow read, delete: if isAuth() && resource.data.coachId == me();
+      allow create: if isAuth() && request.resource.data.coachId == me();
+      allow update: if isAuth() && resource.data.coachId == me() && request.resource.data.coachId == me();
+    }
+
+    match /monthlyRoutines/{routineId} {
+      allow read, delete: if isAuth() && resource.data.coachId == me();
+      allow create: if isAuth() && request.resource.data.coachId == me() && isCoachOf(request.resource.data.athleteId);
+      allow update: if isAuth() && resource.data.coachId == me() && request.resource.data.coachId == me();
+    }
+
+    // Feedback del atleta: él lo escribe (siempre a nombre de su coach real) y el
+    // coach solo puede marcarlo como visto
+    match /sessionFeedback/{feedbackId} {
+      allow read: if isAuth() && (resource.data.coachId == me() || isAthleteSelf(resource.data.athleteId));
+      allow create: if isAuth()
+        && feedbackId == request.resource.data.athleteId + '_' + request.resource.data.date
+        && isAthleteSelf(request.resource.data.athleteId)
+        && request.resource.data.coachId == athleteData(request.resource.data.athleteId).coachId;
+      allow update: if isAuth() && (
+        (isAthleteSelf(resource.data.athleteId)
+          && request.resource.data.athleteId == resource.data.athleteId
+          && request.resource.data.date == resource.data.date
+          && request.resource.data.coachId == athleteData(resource.data.athleteId).coachId)
+        || (resource.data.coachId == me()
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['seenByCoach']))
+      );
+    }
+
+    // ── Clubes ───────────────────────────────────────────────────────────────
+    match /clubs/{clubId} {
+      allow read, delete: if isAuth() && resource.data.coachId == me();
+      allow create: if isAuth() && request.resource.data.coachId == me();
+      allow update: if isAuth() && resource.data.coachId == me() && request.resource.data.coachId == me();
+    }
+
+    // Entrenamientos de club (id: {categoría}_{fecha}). resource == null: día sin entrenamiento.
+    match /clubTrainings/{trainingId} {
+      allow read: if isAuth() && (resource == null || resource.data.coachId == me());
+      allow create: if isAuth() && request.resource.data.coachId == me();
+      allow update: if isAuth() && (!('coachId' in resource.data) || resource.data.coachId == me())
+        && request.resource.data.coachId == me();
+      allow delete: if isAuth() && resource.data.coachId == me();
+    }
+
+    // Cualquier otra colección: denegado (no hay regla general)
+  }
+}

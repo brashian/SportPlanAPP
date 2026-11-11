@@ -1,10 +1,16 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo, memo } from 'react';
-import type { DailyBlock } from '../../types/models';
-import { X, Flame, Dumbbell, Trophy, Check, Download, Loader2, PlayCircle } from 'lucide-react';
+import type { DailyBlock, SessionFeedback } from '../../types/models';
+import { X, Flame, Dumbbell, Trophy, Check, Download, Loader2, PlayCircle, MessageSquare } from 'lucide-react';
+import SessionFeedbackForm, { type FeedbackInput } from './SessionFeedbackForm';
+import type { SaveFeedbackResult } from '../../hooks/useSessionFeedback';
+import Toast, { type ToastState } from '../shared/Toast';
 
 interface Props {
   block: DailyBlock;
   onClose: () => void;
+  // Feedback ya enviado para este día (si existe, el formulario se precarga para editarlo)
+  feedback?: SessionFeedback;
+  onSaveFeedback: (input: FeedbackInput & { completedExerciseIds: string[] }) => Promise<SaveFeedbackResult>;
 }
 
 // ── Helpers puros (fuera del componente: no se recrean en cada render) ──────
@@ -150,7 +156,12 @@ const ExerciseCard = memo(function ExerciseCard({
 
 // ── Componente principal ─────────────────────────────────────────────────────
 
-export default function DailyRoutineModal({ block, onClose }: Props) {
+export default function DailyRoutineModal({ block, onClose, feedback, onSaveFeedback }: Props) {
+  // "routine": la rutina del día · "feedback": el formulario para el coach
+  const [view, setView] = useState<'routine' | 'feedback'>('routine');
+  const [toast, setToast] = useState<ToastState | null>(null);
+  // Referencia estable: si cambiara en cada render, el temporizador del Toast se reiniciaría sin parar
+  const dismissToast = useCallback(() => setToast(null), []);
   const progressKey = `routine-progress-${block.id}`;
 
   // Progreso persistido en localStorage: sobrevive a cerrar la pestaña o la app.
@@ -363,6 +374,22 @@ export default function DailyRoutineModal({ block, onClose }: Props) {
           </div>
         </div>
 
+        {view === 'feedback' ? (
+          <SessionFeedbackForm
+            block={block}
+            existing={feedback}
+            onSave={(input) => onSaveFeedback({ ...input, completedExerciseIds: completedExercises })}
+            onDone={(result) => {
+              setView('routine');
+              setToast({
+                type: 'success',
+                message: result === 'queued' ? 'Guardado. Se envía a tu coach cuando vuelva la conexión.' : 'Feedback enviado a tu coach.',
+              });
+            }}
+            onBack={() => setView('routine')}
+          />
+        ) : (
+        <>
         {/* CUERPO MODAL */}
         <div className="p-3 sm:p-6 overflow-y-auto flex-1 space-y-4 custom-scrollbar overscroll-contain">
           {/* BARRA DE PROGRESO */}
@@ -414,7 +441,14 @@ export default function DailyRoutineModal({ block, onClose }: Props) {
         </div>
 
         {/* FOOTER MODAL */}
-        <div className="shrink-0 p-3 sm:p-4 bg-[var(--ink-900)] border-t border-[var(--line-800)] flex justify-center pb-6 sm:pb-4">
+        <div className="shrink-0 p-3 sm:p-4 bg-[var(--ink-900)] border-t border-[var(--line-800)] flex flex-col gap-2 pb-6 sm:pb-4">
+          <button
+            onClick={() => setView('feedback')}
+            className="w-full font-bold py-3 px-6 rounded-xl transition-all active:scale-95 flex items-center justify-center gap-2 bg-[var(--ink-800)] hover:bg-[var(--line-800)] text-[var(--mist-100)] border border-[var(--line-800)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--signal-500)]"
+          >
+            <MessageSquare size={18} className="text-[var(--signal-500)]" />
+            {feedback ? 'Editar tu feedback para el coach' : 'Contale a tu coach cómo te fue'}
+          </button>
           <button
             onClick={requestClose}
             className={`w-full font-black py-3.5 px-6 rounded-xl transition-all shadow-lg active:scale-95 flex items-center justify-center gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--ink-900)] ${
@@ -426,7 +460,11 @@ export default function DailyRoutineModal({ block, onClose }: Props) {
             {progressPercentage === 100 ? <><Check size={20} strokeWidth={3} /> ¡Sesión Completada!</> : 'Cerrar Sesión'}
           </button>
         </div>
+        </>
+        )}
       </div>
+
+      <Toast toast={toast} onDismiss={dismissToast} />
     </div>
   );
 }

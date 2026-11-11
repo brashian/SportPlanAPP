@@ -7,6 +7,8 @@ import BrandLogo from '../ui/BrandLogo';
 import { SkeletonCard } from '../ui/Skeleton'; // <-- Agregado
 import Toast, { type ToastState } from '../shared/Toast';
 import FormErrorAlert from '../shared/FormErrorAlert';
+import PdfButton from '../shared/pdf/PdfButton';
+import { templateDaysToPdfSection } from '../shared/pdf/pdfMappers';
 
 // ... (Acá va el mismo const tokens y getBlockColor de antes sin cambios)
 const tokens = {
@@ -179,6 +181,17 @@ export default function RoutineLibrary({ coachId }: { coachId: string }) {
               </div>
               <div className="flex gap-2 pt-4 border-t border-[var(--line-800)]">
                 <button onClick={() => handleOpenEditor(t)} className="flex-1 bg-[var(--ink-800)] hover:bg-[var(--line-800)] text-[var(--mist-100)] py-2.5 rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition-colors active:scale-95"><Edit3 size={16} /> Editar</button>
+                <PdfButton
+                  ariaLabel={`Descargar plantilla ${t.name} en PDF`}
+                  fileName={`Plantilla_${t.name}`}
+                  getDocument={() => ({
+                    title: t.name,
+                    subtitle: `Plantilla · ${t.days.length} ${t.days.length === 1 ? 'día' : 'días'}`,
+                    sections: [templateDaysToPdfSection(t.days)],
+                  })}
+                  onError={(message) => setToast({ type: 'error', message })}
+                  className="px-3 py-2.5 bg-[var(--ink-800)] hover:bg-[var(--line-800)] text-[var(--mist-100)] rounded-xl text-sm font-bold flex items-center justify-center gap-1.5 transition-colors active:scale-95 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--signal-500)]"
+                />
                 <button onClick={() => setTemplateToDelete(t.id)} className="p-2.5 bg-[var(--ink-800)] hover:bg-red-500/20 text-[var(--mist-500)] hover:text-red-400 rounded-xl transition-colors active:scale-95"><Trash2 size={18} /></button>
               </div>
             </div>

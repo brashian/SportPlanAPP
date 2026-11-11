@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { ChevronLeft, ChevronRight, Plus, Calendar as CalendarIcon, Dumbbell, Loader2 } from 'lucide-react';
 import { collection, query, where, getDocs } from 'firebase/firestore';
-import { db } from '../../../firebase';
+import { auth, db } from '../../../firebase';
 import { usePlanningStore } from '../../../store/usePlanningStore';
+import { waitForClubTrainingsMigration } from './clubTrainingsMigration';
 
 export default function SeasonCalendar() {
   const { activeCategoryId, setSelectedSession } = usePlanningStore();
@@ -20,7 +21,11 @@ export default function SeasonCalendar() {
       if (!activeCategoryId) return;
       setIsLoading(true);
       try {
-        const q = query(collection(db, "clubTrainings"), where("teamId", "==", activeCategoryId));
+        await waitForClubTrainingsMigration();
+        const coachId = auth.currentUser?.uid;
+        if (!coachId) return;
+        // El filtro por coachId lo exigen las reglas de Firestore para poder listar
+        const q = query(collection(db, "clubTrainings"), where("teamId", "==", activeCategoryId), where("coachId", "==", coachId));
         const snap = await getDocs(q);
         const loaded: any[] = [];
         snap.forEach(doc => { loaded.push({ id: doc.id, ...doc.data() }); });

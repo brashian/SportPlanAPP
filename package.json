@@ -9,7 +9,9 @@
     "preview": "vite preview",
     "generate-pwa-assets": "node scripts/generate-icons.mjs",
     "deploy:preview": "vite build && firebase hosting:channel:deploy preview --expires 7d",
-    "deploy": "vite build && firebase deploy --only hosting"
+    "deploy": "vite build && firebase deploy --only hosting",
+    "test:rules": "firebase emulators:exec --only firestore --project demo-sportplan \"node --test tests/firestore.rules.test.mjs\"",
+    "deploy:rules": "firebase deploy --only firestore:rules"
   },
   "dependencies": {
     "firebase": "^12.15.0",
@@ -22,6 +24,7 @@
     "zustand": "^5.0.15"
   },
   "devDependencies": {
+    "@firebase/rules-unit-testing": "^5.0.2",
     "@resvg/resvg-js": "^2.6.2",
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",

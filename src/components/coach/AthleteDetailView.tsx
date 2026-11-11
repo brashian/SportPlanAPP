@@ -22,6 +22,8 @@ import { usePlanningForms } from "./athlete-detail/hooks/usePlanningForms";
 import { useBlockCalendar } from "./athlete-detail/hooks/useBlockCalendar";
 import { useRoutineInjection } from "./athlete-detail/hooks/useRoutineInjection";
 import type { AthleteFormData } from "./athlete-detail/types";
+import RecentFeedbackCard from "./athlete-detail/RecentFeedbackCard";
+import { useSessionFeedback } from "../../hooks/useSessionFeedback";
 
 // El editor trae Quill (~240 kB): se descarga recién al abrir "Cargar Sesión" / "Editar"
 const DailyBlockEditorModal = lazyWithRetry(() => import("./athlete-detail/DailyBlockEditorModal"));
@@ -70,13 +72,18 @@ export default function AthleteDetailView({
     athlete, athleteId, isSubmitting, setIsSubmitting, showToast,
     onCreateMacrocycle, onUpdateMacrocycle, onCreateMesocycle, onUpdateMesocycle,
   });
-  const calendar = useBlockCalendar({ isSubmitting, setIsSubmitting, showToast });
+  const calendar = useBlockCalendar({
+    isSubmitting, setIsSubmitting, showToast,
+    owner: athlete ? { coachId: athlete.coachId, athleteId: athlete.id } : undefined,
+  });
   const injection = useRoutineInjection({
     athlete, athleteId, setIsSubmitting, showToast,
     blocksByMesocycle: calendar.blocksByMesocycle,
     setBlocksByMesocycle: calendar.setBlocksByMesocycle,
     handleViewBlocks: calendar.handleViewBlocks,
   });
+  // Feedback que el atleta envía de cada sesión (se marca como visto al abrirlo)
+  const { feedbackByDate, markSeen } = useSessionFeedback(athlete ? athleteId : undefined, athlete?.coachId);
 
   // ── Perfil del atleta ──────────────────────────────────────────────────────
 
@@ -210,6 +217,8 @@ export default function AthleteDetailView({
         onDelete={() => setAthleteToDelete(true)}
       />
 
+      <RecentFeedbackCard feedbackByDate={feedbackByDate} onSeen={markSeen} />
+
       <div className="mt-8">
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
           <div>
@@ -245,6 +254,9 @@ export default function AthleteDetailView({
                 key={macro.id}
                 macro={macro}
                 blocksByMesocycle={calendar.blocksByMesocycle}
+                feedbackByDate={feedbackByDate}
+                athleteName={fullName || "Atleta"}
+                onPdfError={(message) => showToast('error', message)}
                 activeViewMesoId={calendar.activeViewMesoId}
                 isLoadingBlocks={calendar.isLoadingBlocks}
                 onEdit={() => forms.openMacroModal(macro)}
@@ -254,7 +266,7 @@ export default function AthleteDetailView({
                 onDeleteMeso={(meso) => setMesoToDelete({ macroId: macro.id, mesoId: meso.id })}
                 onPasteTemplate={injection.openPasteTemplate}
                 onToggleCalendar={(meso) => calendar.handleViewBlocks(meso.id)}
-                onOpenDay={(meso, date, dayName, existingBlock) => calendar.handleOpenBlockModal(meso.id, date, dayName, existingBlock)}
+                onOpenDay={(meso, date, dayName, existingBlock) => { calendar.handleOpenBlockModal(meso.id, date, dayName, existingBlock); markSeen(date); }}
               />
             ))}
           </div>
@@ -264,6 +276,8 @@ export default function AthleteDetailView({
       <MonthlyRoutineManager
         athleteId={athlete.id}
         coachId={athlete.coachId}
+        athleteName={fullName || "Atleta"}
+        onPdfError={(message) => showToast('error', message)}
         templates={injection.templates}
         monthlyRoutines={injection.monthlyRoutines}
         onInjectRequest={injection.openInjectRoutine}
@@ -356,6 +370,7 @@ export default function AthleteDetailView({
             isSubmitting={isSubmitting}
             onSubmit={calendar.handleBlockSubmit}
             onClose={() => calendar.setIsBlockModalOpen(false)}
+            feedback={feedbackByDate[calendar.activeBlockContext.date]}
           />
         </Suspense>
       )}

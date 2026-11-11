@@ -198,7 +198,8 @@ function CoachApp({ currentUser }: { currentUser: AuthUser }) {
     try {
       const [macroSnap, routinesSnap] = await Promise.all([
         getDocs(query(collection(db, "macrocycles"), where("athleteId", "==", athleteId))),
-        getDocs(query(collection(db, "monthlyRoutines"), where("athleteId", "==", athleteId))),
+        // El filtro por coachId lo exigen las reglas de Firestore para poder listar
+        getDocs(query(collection(db, "monthlyRoutines"), where("athleteId", "==", athleteId), where("coachId", "==", coachId))),
       ]);
 
       const batch = writeBatch(db);

@@ -1,6 +1,7 @@
 import { useState, useMemo, useCallback, Suspense } from "react";
 import type { Athlete, DailyBlock } from "../../types/models";
-import { Flame, Dumbbell, ChevronDown, Calendar as CalendarIcon, Activity, Trophy, ChevronRight, CheckCircle2 } from "lucide-react";
+import { Flame, Dumbbell, ChevronDown, Calendar as CalendarIcon, Activity, Trophy, ChevronRight, CheckCircle2, MessageSquare } from "lucide-react";
+import { useSessionFeedback } from "../../hooks/useSessionFeedback";
 import GlobalLoader from "../ui/GlobalLoader";
 import { Skeleton } from "../ui/Skeleton";
 import { lazyWithRetry } from "../../utils/lazyWithRetry";
@@ -59,6 +60,7 @@ const isRoutineFullyCompleted = (block?: DailyBlock | null): boolean => {
 };
 
 export default function AthleteView({ athlete, blocksByMesocycle }: Props) {
+  const { feedbackByDate, saveFeedback } = useSessionFeedback(athlete.id);
   const [selectedDailyBlock, setSelectedDailyBlock] = useState<DailyBlock | null>(null);
   const [completionTick, setCompletionTick] = useState(0);
 
@@ -187,13 +189,16 @@ export default function AthleteView({ athlete, blocksByMesocycle }: Props) {
                   <span className={`text-[10px] sm:text-xs font-bold uppercase tracking-wider ${isToday ? 'text-white/80' : 'text-[var(--mist-500)]'}`}>{dayNamesShort[d.getDay()]}</span>
                   <span className={`text-lg sm:text-xl font-black mt-1 ${isToday ? 'text-white' : 'text-[var(--mist-100)]'}`}>{d.getDate()}</span>
 
-                  <div className="mt-2 h-4 flex items-center justify-center">
+                  <div className="mt-2 h-4 flex items-center justify-center gap-1">
                     {blockForThisDay && (
                       isCompleted ? (
                         <CheckCircle2 size={14} className={isToday ? "text-white" : "text-[var(--pulse-500)]"} />
                       ) : (
                         <div className={`w-1.5 h-1.5 rounded-full transition-all ${isToday ? 'bg-white shadow-[0_0_8px_white]' : 'bg-[var(--signal-500)]'}`}></div>
                       )
+                    )}
+                    {feedbackByDate[dateS] && (
+                      <MessageSquare size={12} aria-label="Feedback enviado" className={isToday ? "text-white" : "text-[var(--mist-300)]"} />
                     )}
                   </div>
                 </button>
@@ -281,13 +286,16 @@ export default function AthleteView({ athlete, blocksByMesocycle }: Props) {
                                         <span className={`text-[9px] sm:text-[10px] font-bold uppercase tracking-wider z-10 ${isToday && block ? 'text-white/80' : 'text-[var(--mist-500)]'}`}>{dayNamesShort[d.getDay()]}</span>
                                         <span className={`text-base sm:text-lg font-black z-10 mt-0.5 ${isToday && block ? 'text-white' : block ? 'text-[var(--mist-100)]' : 'text-[var(--mist-500)]/40'}`}>{d.getDate()}</span>
 
-                                        <div className="mt-1.5 h-3 flex items-center justify-center z-10 transition-all group-hover:scale-125">
+                                        <div className="mt-1.5 h-3 flex items-center justify-center gap-0.5 z-10 transition-all group-hover:scale-125">
                                           {block && (
                                             isCompleted ? (
                                               <CheckCircle2 size={12} className={isToday ? "text-white" : "text-[var(--pulse-500)]"} />
                                             ) : (
                                               <div className={`w-1.5 h-1.5 rounded-full ${isToday ? 'bg-white shadow-[0_0_5px_white]' : 'bg-[var(--signal-500)]'}`}></div>
                                             )
+                                          )}
+                                          {feedbackByDate[dateStr] && (
+                                            <MessageSquare size={10} aria-label="Feedback enviado" className={isToday ? "text-white" : "text-[var(--mist-300)]"} />
                                           )}
                                         </div>
 
@@ -318,7 +326,20 @@ export default function AthleteView({ athlete, blocksByMesocycle }: Props) {
 
       {selectedDailyBlock && (
         <Suspense fallback={<GlobalLoader />}>
-          <DailyRoutineModal block={selectedDailyBlock} onClose={closeDailyModal} />
+          <DailyRoutineModal
+            block={selectedDailyBlock}
+            onClose={closeDailyModal}
+            feedback={feedbackByDate[selectedDailyBlock.date]}
+            onSaveFeedback={(input) => saveFeedback({
+              ...input,
+              athleteId: athlete.id,
+              coachId: athlete.coachId,
+              mesocycleId: selectedDailyBlock.mesocycleId,
+              blockId: selectedDailyBlock.id,
+              date: selectedDailyBlock.date,
+              sessionType: selectedDailyBlock.sessionType,
+            })}
+          />
         </Suspense>
       )}
     </div>

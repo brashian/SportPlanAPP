@@ -1,12 +1,18 @@
 import { useState } from "react";
 import { Edit3, Trash2 } from "lucide-react";
-import type { DailyBlock, Mesocycle } from "../../../types/models";
+import { doc, getDoc } from "firebase/firestore";
+import { db } from "../../../firebase";
+import type { DailyBlock, Mesocycle, SessionFeedback } from "../../../types/models";
 import MesocycleCalendar from "./MesocycleCalendar";
-import { toDayMonthYear } from "./dateHelpers";
+import { getWeeksInRange, toDayMonthYear } from "./dateHelpers";
+import PdfButton, { PdfUserError } from "../../shared/pdf/PdfButton";
+import { weekToPdfSection } from "../../shared/pdf/pdfMappers";
+import type { PdfSection, RoutinePdfProps } from "../../shared/pdf/RoutinePdfDocument";
 
 interface MesocycleCardProps {
   meso: Mesocycle;
   blocks: DailyBlock[];
+  feedbackByDate: Record<string, SessionFeedback>;
   isCalendarOpen: boolean;
   isLoadingBlocks: boolean;
   onEdit: () => void;
@@ -14,15 +20,34 @@ interface MesocycleCardProps {
   onPasteTemplate: () => void;
   onToggleCalendar: () => void;
   onOpenDay: (date: string, dayName: string, existingBlock?: DailyBlock) => void;
+  athleteName: string;
+  onPdfError: (message: string) => void;
 }
 
 // Fila de un mesociclo con sus acciones y, si está abierto, su calendario
 export default function MesocycleCard({
-  meso, blocks, isCalendarOpen, isLoadingBlocks, onEdit, onDelete, onPasteTemplate, onToggleCalendar, onOpenDay,
+  meso, blocks, feedbackByDate, isCalendarOpen, isLoadingBlocks, onEdit, onDelete, onPasteTemplate, onToggleCalendar, onOpenDay,
+  athleteName, onPdfError,
 }: MesocycleCardProps) {
   // Vive acá (y no dentro del calendario) para que la semana abierta se mantenga
   // cuando el calendario se recarga, por ejemplo después de inyectar una rutina
   const [expandedWeek, setExpandedWeek] = useState<string | null>(null);
+
+  // PDF del mesociclo completo: trae los bloques de Firestore (el calendario puede no estar abierto)
+  const buildMesoPdf = async (): Promise<RoutinePdfProps> => {
+    const snap = await getDoc(doc(db, "mesocycleBlocks", meso.id));
+    const mesoBlocks: DailyBlock[] = snap.exists() && snap.data().blocks ? Object.values(snap.data().blocks) : [];
+    const sections = getWeeksInRange(meso.startDate, meso.endDate)
+      .map((week) => weekToPdfSection(week, mesoBlocks))
+      .filter((s): s is PdfSection => s !== null);
+    if (sections.length === 0) throw new PdfUserError("Este mesociclo no tiene sesiones cargadas.");
+    return {
+      title: meso.name,
+      subtitle: `${meso.phase} · ${toDayMonthYear(meso.startDate)} al ${toDayMonthYear(meso.endDate)}`,
+      athleteName,
+      sections,
+    };
+  };
 
   return (
     <div className="border border-[var(--line-800)] rounded-2xl p-4 sm:p-5 bg-[var(--ink-850)] hover:border-[var(--mist-500)]/40 transition-colors">
@@ -42,6 +67,13 @@ export default function MesocycleCard({
         </div>
 
         <div className="flex w-full lg:w-auto gap-2">
+          <PdfButton
+            ariaLabel={`Descargar mesociclo ${meso.name} en PDF`}
+            fileName={`${athleteName}_${meso.name}`}
+            getDocument={buildMesoPdf}
+            onError={onPdfError}
+            className="text-center bg-[var(--ink-800)] hover:bg-[var(--line-800)] border border-[var(--line-800)] text-[var(--mist-100)] px-3 sm:px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-colors active:scale-95 flex items-center justify-center gap-1.5 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--signal-500)]"
+          />
           <button onClick={onPasteTemplate} className="flex-1 lg:flex-none text-center bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-colors active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400">
             Pegar Plantilla
           </button>
@@ -65,9 +97,12 @@ export default function MesocycleCard({
             <MesocycleCalendar
               meso={meso}
               blocks={blocks}
+              feedbackByDate={feedbackByDate}
               expandedWeek={expandedWeek}
               onToggleWeek={setExpandedWeek}
               onOpenDay={onOpenDay}
+              athleteName={athleteName}
+              onPdfError={onPdfError}
             />
           )}
         </div>

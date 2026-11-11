@@ -9,12 +9,19 @@ interface UseBlockCalendarParams {
   isSubmitting: boolean;
   setIsSubmitting: Dispatch<SetStateAction<boolean>>;
   showToast: (type: ToastState["type"], message: string) => void;
+  // Dueño de los bloques: las reglas de Firestore lo usan para saber quién puede leer/escribir
+  owner?: BlockOwner;
+}
+
+export interface BlockOwner {
+  coachId: string;
+  athleteId: string;
 }
 
 const EMPTY_BLOCK: BlockFormData = { sessionType: "", intensity: 5, volume: "Medio", durationMinutes: 60, notesHtml: "", exercises: [] };
 
 // Calendario de sesiones por mesociclo: carga de bloques y editor del día
-export function useBlockCalendar({ isSubmitting, setIsSubmitting, showToast }: UseBlockCalendarParams) {
+export function useBlockCalendar({ isSubmitting, setIsSubmitting, showToast, owner }: UseBlockCalendarParams) {
   const [blocksByMesocycle, setBlocksByMesocycle] = useState<Record<string, DailyBlock[]>>({});
   const [activeViewMesoId, setActiveViewMesoId] = useState<string | null>(null);
   const [isLoadingBlocks, setIsLoadingBlocks] = useState(false);
@@ -32,6 +39,12 @@ export function useBlockCalendar({ isSubmitting, setIsSubmitting, showToast }: U
         fetchedBlocks = Object.values(docSnap.data().blocks);
       }
       setBlocksByMesocycle((prev) => ({ ...prev, [mesocycleId]: fetchedBlocks }));
+
+      // Migración: documentos creados antes de guardar el dueño lo reciben ahora,
+      // sin tocar los bloques. No es crítico: si falla, se reintenta la próxima vez.
+      if (docSnap.exists() && !docSnap.data().coachId && owner) {
+        setDoc(docRef, owner, { merge: true }).catch((error) => console.error("Error al migrar el dueño de los bloques:", error));
+      }
     } catch (error) {
       console.error(error);
       showToast('error', 'No se pudo cargar el calendario de este mesociclo.');
@@ -55,7 +68,7 @@ export function useBlockCalendar({ isSubmitting, setIsSubmitting, showToast }: U
       };
 
       const docRef = doc(db, "mesocycleBlocks", mesocycleId);
-      await setDoc(docRef, { blocks: { [blockData.date]: finalBlock } }, { merge: true });
+      await setDoc(docRef, { ...owner, blocks: { [blockData.date]: finalBlock } }, { merge: true });
 
       setBlocksByMesocycle((prev) => {
         const currentMesoBlocks = prev[mesocycleId] || [];

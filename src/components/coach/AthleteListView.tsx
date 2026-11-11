@@ -1,6 +1,8 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { Users, Search, Plus, X, ChevronRight, Activity, Loader2, AlertCircle } from "lucide-react";
+import { collection, getDocs, query, where } from "firebase/firestore";
+import { Users, Search, Plus, X, ChevronRight, Activity, Loader2, AlertCircle, MessageSquare } from "lucide-react";
+import { auth, db } from "../../firebase";
 import type { Athlete } from "../../types/models";
 import { athleteFullName } from "../../types/models";
 import ModalShell from "../shared/ModalShell";
@@ -36,6 +38,34 @@ export default function AthleteListView({ athletes, isLoading, areMacrosLoading,
   const [formData, setFormData] = useState({
     firstName: "", lastName: "", sport: "", email: "", phone: "",
   });
+
+  // Feedback sin ver por atleta: una sola consulta para toda la lista
+  const [unseenByAthlete, setUnseenByAthlete] = useState<Record<string, number>>({});
+  useEffect(() => {
+    let cancelled = false;
+    async function loadUnseen() {
+      const coachId = auth.currentUser?.uid;
+      if (!coachId) return;
+      try {
+        const snap = await getDocs(query(
+          collection(db, "sessionFeedback"),
+          where("coachId", "==", coachId),
+          where("seenByCoach", "==", false),
+        ));
+        const counts: Record<string, number> = {};
+        snap.forEach((d) => {
+          const athleteId = d.data().athleteId as string;
+          counts[athleteId] = (counts[athleteId] || 0) + 1;
+        });
+        if (!cancelled) setUnseenByAthlete(counts);
+      } catch (error) {
+        // No es crítico: la lista se muestra igual, sin los badges
+        if (!cancelled) console.error("Error al traer el feedback sin ver:", error);
+      }
+    }
+    loadUnseen();
+    return () => { cancelled = true; };
+  }, []);
 
   const filteredAthletes = useMemo(() => {
     const term = searchTerm.trim().toLowerCase();
@@ -148,6 +178,11 @@ export default function AthleteListView({ athletes, isLoading, areMacrosLoading,
                     <span className="inline-block mt-1 text-[10px] font-black uppercase tracking-wider bg-[var(--ink-800)] text-[var(--mist-300)] px-2 py-0.5 rounded-md">
                       {athlete.sport || "Sin Deporte"}
                     </span>
+                    {unseenByAthlete[athlete.id] > 0 && (
+                      <span className="inline-flex items-center gap-1 mt-1 ml-1.5 text-[10px] font-black uppercase tracking-wider bg-[var(--signal-500)] text-[var(--ink-950)] px-2 py-0.5 rounded-md">
+                        <MessageSquare size={11} /> {unseenByAthlete[athlete.id]} nuevo{unseenByAthlete[athlete.id] > 1 ? "s" : ""}
+                      </span>
+                    )}
                   </div>
                 </div>
 

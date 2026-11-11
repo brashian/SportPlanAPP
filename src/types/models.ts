@@ -165,6 +165,48 @@ export interface RoutineTemplate {
   createdAt: string;
 }
 
+// ----------------------------------------------------------------------------
+// Feedback del atleta sobre una sesión (colección "sessionFeedback")
+// Un documento por atleta y por día: id = `${athleteId}_${date}`
+// ----------------------------------------------------------------------------
+export type ExerciseFeel = "Liviano" | "Justo" | "Pesado" | "No lo hice";
+export const EXERCISE_FEELS: ExerciseFeel[] = ["Liviano", "Justo", "Pesado", "No lo hice"];
+
+// 1 = Fresco ... 5 = Agotado
+export const FATIGUE_LABELS = ["Fresco", "Bien", "Normal", "Cansado", "Agotado"] as const;
+
+export interface ExerciseFeedback {
+  exerciseId: string;
+  name: string;
+  plannedWeight: string; // lo que cargó el coach (referencia para detectar pesos nuevos)
+  feel: ExerciseFeel | null;
+  weightUsed: string; // "" si no lo informó
+}
+
+export interface SessionFeedback {
+  id: string;
+  athleteId: string;
+  coachId: string;
+  mesocycleId: string;
+  blockId: string;
+  date: string; // ISO "yyyy-MM-dd"
+  sessionType: string;
+  rpe: number | null; // esfuerzo percibido 1-10
+  fatigue: number | null; // 1-5 (ver FATIGUE_LABELS)
+  exercises: ExerciseFeedback[];
+  completedExerciseIds: string[];
+  notes: string;
+  seenByCoach: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// Peso nuevo = el atleta informó un peso distinto del planificado
+export function isNewWeight(ex: Pick<ExerciseFeedback, "plannedWeight" | "weightUsed">): boolean {
+  const used = ex.weightUsed.trim().toLowerCase();
+  return used !== "" && used !== ex.plannedWeight.trim().toLowerCase();
+}
+
 export interface MonthlyRoutine {
   id: string;
   athleteId: string;

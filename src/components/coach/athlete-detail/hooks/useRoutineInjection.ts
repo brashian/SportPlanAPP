@@ -53,7 +53,8 @@ export function useRoutineInjection({
       if (!athlete?.coachId) return;
       try {
         const qT = query(collection(db, "routineTemplates"), where("coachId", "==", athlete.coachId));
-        const qM = query(collection(db, "monthlyRoutines"), where("athleteId", "==", athleteId));
+        // El filtro por coachId lo exigen las reglas de Firestore para poder listar
+        const qM = query(collection(db, "monthlyRoutines"), where("athleteId", "==", athleteId), where("coachId", "==", athlete.coachId));
         // Las dos consultas son independientes: van en paralelo
         const [snapT, snapM] = await Promise.all([getDocs(qT), getDocs(qM)]);
 
@@ -120,7 +121,9 @@ export function useRoutineInjection({
       }
 
       const docRef = doc(db, "mesocycleBlocks", targetMeso.id);
-      await setDoc(docRef, { blocks: blocksToInject }, { merge: true });
+      // coachId/athleteId: dueño del documento para las reglas de Firestore
+      const owner = athlete ? { coachId: athlete.coachId, athleteId: athlete.id } : {};
+      await setDoc(docRef, { ...owner, blocks: blocksToInject }, { merge: true });
 
       setBlocksByMesocycle(prev => {
         const currentList = prev[targetMeso.id] || [];
