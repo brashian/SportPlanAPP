@@ -1,77 +1,43 @@
-import { useState, useEffect, lazy, Suspense } from "react";
+import { useState, useEffect, Suspense } from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
 import type { AuthUser, Athlete, DailyBlock, Mesocycle, MesocyclePhase, Macrocycle, UserRole } from "./types/models";
 import { db, auth } from "./firebase";
 import { collection, doc, setDoc, getDoc, getDocs, query, where, updateDoc, arrayUnion, deleteDoc, writeBatch } from "firebase/firestore";
 import { onAuthStateChanged, signOut, type User } from 'firebase/auth';
 import LoginView from './components/log/LoginView';
-import { AlertCircle, LogOut, Dumbbell } from 'lucide-react';
+import { AlertCircle, LogOut } from 'lucide-react';
+import GlobalLoader from './components/ui/GlobalLoader';
+import ErrorBoundary from './components/shared/ErrorBoundary';
+import { lazyWithRetry } from './utils/lazyWithRetry';
 
-const PlanningView = lazy(() => import("./components/coach/PlanningView"));
-const CoachLayout = lazy(() => import("./components/coach/CoachLayout"));
-const AthleteListView = lazy(() => import("./components/coach/AthleteListView"));
-const AthleteDetailView = lazy(() => import("./components/coach/AthleteDetailView"));
-const AthleteLayout = lazy(() => import("./components/athlete/AthleteLayout"));
-const AthleteView = lazy(() => import("./components/athlete/AthleteView"));
-const RoutineLibrary = lazy(() => import("./components/coach/RoutineLibrary"));
+const PlanningView = lazyWithRetry(() => import("./components/coach/PlanningView"));
+const CoachLayout = lazyWithRetry(() => import("./components/coach/CoachLayout"));
+const AthleteListView = lazyWithRetry(() => import("./components/coach/AthleteListView"));
+const AthleteDetailView = lazyWithRetry(() => import("./components/coach/AthleteDetailView"));
+const AthleteLayout = lazyWithRetry(() => import("./components/athlete/AthleteLayout"));
+const AthleteView = lazyWithRetry(() => import("./components/athlete/AthleteView"));
+const RoutineLibrary = lazyWithRetry(() => import("./components/coach/RoutineLibrary"));
 
 // Firebase Auth devuelve los emails en minúsculas; guardamos y buscamos igual
 // para que el vínculo coach → atleta no dependa de cómo se tipeó el email.
 const normalizeEmail = (email?: string) => (email ?? "").trim().toLowerCase();
 
-// ── Pantallas de carga premium (reemplazan los flashes blancos/grises) ──────
-// 'dark' matcheá la estética del lado atleta (fondo navy + glow azul, como
-// AthleteView). 'light' matcheá el lado coach (card blanca elevada, como
-// AthleteDetailView y DailyRoutineModal).
-
-function LoadingScreen({ message, variant = "dark" }: { message: string; variant?: "dark" | "light" }) {
-  if (variant === "dark") {
-    return (
-      <div className="min-h-screen bg-[#0B0F19] flex items-center justify-center relative overflow-hidden">
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[480px] h-[480px] bg-blue-600/20 blur-[120px] rounded-full pointer-events-none" />
-        <div className="relative z-10 flex flex-col items-center gap-5" role="status" aria-live="polite">
-          <div className="relative w-16 h-16 flex items-center justify-center">
-            <div className="absolute inset-0 rounded-full border-4 border-slate-700/60" />
-            <div className="absolute inset-0 rounded-full border-4 border-transparent border-t-blue-500 animate-spin" />
-            <Dumbbell className="text-blue-400" size={22} />
-          </div>
-          <p className="text-slate-300 font-bold tracking-wide text-sm">{message}</p>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="min-h-screen bg-slate-50 flex items-center justify-center">
-      <div className="flex flex-col items-center gap-4 bg-white px-10 py-8 rounded-3xl shadow-xl border border-slate-100" role="status" aria-live="polite">
-        <div className="relative w-12 h-12 flex items-center justify-center">
-          <div className="absolute inset-0 rounded-full border-4 border-blue-100" />
-          <div className="absolute inset-0 rounded-full border-4 border-transparent border-t-blue-600 animate-spin" />
-        </div>
-        <p className="text-slate-500 font-bold text-sm">{message}</p>
-      </div>
-    </div>
-  );
+// Lunes de la semana actual en formato YYYY-MM-DD (hora local), igual que "Tu Semana"
+function mondayOfCurrentWeek() {
+  const d = new Date();
+  const day = d.getDay();
+  d.setDate(d.getDate() - (day === 0 ? 6 : day - 1));
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
-// Skeleton para la lista de atletas del coach: en vez de un spinner genérico,
-// muestra la FORMA del contenido que está por llegar (percepción de carga
-// mucho mejor que un spinner suelto sobre fondo vacío).
-function AthleteListSkeleton() {
-  return (
-    <div className="p-4 sm:p-6 lg:p-8 max-w-6xl mx-auto space-y-6" aria-busy="true" aria-live="polite">
-      <div className="h-8 w-52 bg-slate-200 rounded-lg animate-pulse" />
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-        {[0, 1, 2, 3, 4, 5].map((i) => (
-          <div key={i} className="bg-white border border-slate-200 rounded-3xl p-6 shadow-sm animate-pulse" style={{ animationDelay: `${i * 60}ms` }}>
-            <div className="w-14 h-14 rounded-2xl bg-slate-200 mb-4" />
-            <div className="h-4 w-2/3 bg-slate-200 rounded mb-2" />
-            <div className="h-3 w-1/3 bg-slate-100 rounded" />
-          </div>
-        ))}
-      </div>
-    </div>
-  );
+// Trae los bloques diarios de varios mesociclos en paralelo
+async function fetchBlocksFor(mesos: Mesocycle[]) {
+  const result: Record<string, DailyBlock[]> = {};
+  await Promise.all(mesos.map(async (meso) => {
+    const docSnap = await getDoc(doc(db, "mesocycleBlocks", meso.id));
+    result[meso.id] = docSnap.exists() && docSnap.data().blocks ? Object.values(docSnap.data().blocks) : [];
+  }));
+  return result;
 }
 
 export default function App() {
@@ -110,21 +76,21 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  if (loading) return <LoadingScreen message="Cargando plataforma..." variant="dark" />;
+  if (loading) return <GlobalLoader message="Cargando plataforma..." />;
   if (!user) return <LoginView />;
 
   if (role === 'coach' && isApproved === false) {
     return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
-        <div className="bg-white max-w-md w-full rounded-3xl shadow-xl p-8 text-center border border-slate-100 animate-in zoom-in-95 duration-300">
-          <div className="w-20 h-20 bg-amber-100 text-amber-500 rounded-full flex items-center justify-center mx-auto mb-6 shadow-inner">
+      <div className="min-h-[100dvh] bg-[var(--ink-950)] flex items-center justify-center p-4">
+        <div className="bg-[var(--ink-900)] max-w-md w-full rounded-3xl shadow-xl p-8 text-center border border-[var(--line-800)] animate-in zoom-in-95 duration-300">
+          <div className="w-20 h-20 bg-amber-500/10 text-amber-400 rounded-full flex items-center justify-center mx-auto mb-6">
             <AlertCircle size={40} />
           </div>
-          <h2 className="text-2xl font-black text-slate-800 mb-3">Cuenta en Revisión</h2>
-          <p className="text-slate-500 mb-8 leading-relaxed font-medium">
+          <h2 className="text-2xl font-black text-[var(--mist-100)] mb-3">Cuenta en Revisión</h2>
+          <p className="text-[var(--mist-500)] mb-8 leading-relaxed font-medium">
             Tu registro como Entrenador se completó con éxito, pero tu cuenta requiere la aprobación del Administrador Principal para acceder a la base de datos de atletas. Por favor, aguarda la confirmación.
           </p>
-          <button onClick={() => signOut(auth)} className="w-full bg-slate-900 hover:bg-black text-white font-bold py-3.5 rounded-xl transition-all shadow-lg active:scale-95 flex items-center justify-center gap-2">
+          <button onClick={() => signOut(auth)} className="w-full bg-[var(--ink-800)] hover:bg-[var(--line-800)] text-[var(--mist-100)] border border-[var(--line-800)] font-bold py-3.5 rounded-xl transition-all shadow-lg active:scale-95 flex items-center justify-center gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--signal-500)]">
             <LogOut size={18} /> Cerrar Sesión
           </button>
         </div>
@@ -133,13 +99,15 @@ export default function App() {
   }
 
   return (
-    <Suspense fallback={<LoadingScreen message="Cargando plataforma..." variant={role === 'athlete' ? 'dark' : 'light'} />}>
-      {role === 'coach' ? (
-        <CoachApp currentUser={{ id: user.uid, role: 'coach', name: user.email || "Coach", email: user.email ?? undefined }} />
-      ) : (
-        <AthleteApp currentUser={{ id: user.uid, role: 'athlete', name: user.email || "Atleta", email: user.email ?? undefined }} />
-      )}
-    </Suspense>
+    <ErrorBoundary>
+      <Suspense fallback={<GlobalLoader message="Cargando plataforma..." />}>
+        {role === 'coach' ? (
+          <CoachApp currentUser={{ id: user.uid, role: 'coach', name: user.email || "Coach", email: user.email ?? undefined }} />
+        ) : (
+          <AthleteApp currentUser={{ id: user.uid, role: 'athlete', name: user.email || "Atleta", email: user.email ?? undefined }} />
+        )}
+      </Suspense>
+    </ErrorBoundary>
   );
 }
 
@@ -149,13 +117,16 @@ function CoachApp({ currentUser }: { currentUser: AuthUser }) {
 
   const [athletes, setAthletes] = useState<Athlete[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [areMacrosLoading, setAreMacrosLoading] = useState(true);
 
+  // Carga en dos pasos: primero los atletas (la lista se muestra enseguida) y
+  // después, en segundo plano, sus macrociclos para el contador de cada tarjeta.
   useEffect(() => {
     async function fetchAthletes() {
+      let fetchedAthletes: Athlete[] = [];
       try {
         const q = query(collection(db, "athletes"), where("coachId", "==", coachId));
         const querySnapshot = await getDocs(q);
-        const fetchedAthletes: Athlete[] = [];
         querySnapshot.forEach((doc) => {
           const data = doc.data();
           fetchedAthletes.push({
@@ -164,30 +135,33 @@ function CoachApp({ currentUser }: { currentUser: AuthUser }) {
             phone: data.phone || "", macrocycles: data.macrocycles || [],
           } as Athlete);
         });
-
-        // Los macrociclos viven en su propia colección: los traemos para que la
-        // lista muestre el contador real. Firestore limita "in" a 30 valores, por
-        // eso va en grupos. Si falla (ej. reglas), la lista carga igual.
-        try {
-          const ids = fetchedAthletes.map((a) => a.id);
-          const macrosByAthlete: Record<string, Macrocycle[]> = {};
-          for (let i = 0; i < ids.length; i += 30) {
-            const macroSnap = await getDocs(query(collection(db, "macrocycles"), where("athleteId", "in", ids.slice(i, i + 30))));
-            macroSnap.forEach((macroDoc) => {
-              const macro = { id: macroDoc.id, ...macroDoc.data() } as Macrocycle;
-              (macrosByAthlete[macro.athleteId] ||= []).push(macro);
-            });
-          }
-          fetchedAthletes.forEach((a) => {
-            a.macrocycles = (macrosByAthlete[a.id] || []).sort((x, y) => x.startDate.localeCompare(y.startDate));
-          });
-        } catch (error) {
-          console.error("Error al traer los macrociclos de la lista:", error);
-        }
-
         setAthletes(fetchedAthletes);
       } catch (error) { console.error("Error al traer los atletas:", error); }
       finally { setIsLoading(false); }
+
+      // Los macrociclos viven en su propia colección: los traemos para que la
+      // lista muestre el contador real. Firestore limita "in" a 30 valores, por
+      // eso va en grupos. Si falla (ej. reglas), la lista ya está visible igual.
+      try {
+        const ids = fetchedAthletes.map((a) => a.id);
+        const macrosByAthlete: Record<string, Macrocycle[]> = {};
+        for (let i = 0; i < ids.length; i += 30) {
+          const macroSnap = await getDocs(query(collection(db, "macrocycles"), where("athleteId", "in", ids.slice(i, i + 30))));
+          macroSnap.forEach((macroDoc) => {
+            const macro = { id: macroDoc.id, ...macroDoc.data() } as Macrocycle;
+            (macrosByAthlete[macro.athleteId] ||= []).push(macro);
+          });
+        }
+        // Solo completa a los atletas que siguen sin macrociclos: si el coach ya
+        // abrió un perfil (o creó un macrociclo) mientras tanto, no lo pisamos.
+        setAthletes((prev) => prev.map((a) => a.macrocycles.length > 0 ? a : {
+          ...a, macrocycles: (macrosByAthlete[a.id] || []).sort((x, y) => x.startDate.localeCompare(y.startDate)),
+        }));
+      } catch (error) {
+        console.error("Error al traer los macrociclos de la lista:", error);
+      } finally {
+        setAreMacrosLoading(false);
+      }
     }
     fetchAthletes();
   }, [coachId]);
@@ -376,18 +350,27 @@ function CoachApp({ currentUser }: { currentUser: AuthUser }) {
     }
   }
 
-  if (isLoading) return <AthleteListSkeleton />;
-
   return (
     <Routes>
       <Route path="/" element={<CoachLayout coachName={coachName} />}>
         <Route index element={<Navigate to="/athletes" replace />} />
-        <Route path="athletes" element={<AthleteListView athletes={athletes} onCreateAthlete={handleCreateAthlete} />} />
+        <Route
+          path="athletes"
+          element={
+            <AthleteListView
+              athletes={athletes}
+              isLoading={isLoading}
+              areMacrosLoading={areMacrosLoading}
+              onCreateAthlete={handleCreateAthlete}
+            />
+          }
+        />
         <Route
           path="athletes/:athleteId"
           element={
             <AthleteDetailView
               athletes={athletes}
+              isLoadingAthletes={isLoading}
               onLoadMacrocycles={handleLoadMacrocycles}
               onCreateMacrocycle={handleCreateMacrocycle}
               onUpdateMacrocycle={handleUpdateMacrocycle}
@@ -418,6 +401,7 @@ function AthleteApp({ currentUser }: { currentUser: AuthUser }) {
   useEffect(() => {
     async function fetchAthleteData() {
       if (!athleteEmail) { setIsLoading(false); return; }
+      let pastMesos: Mesocycle[] = [];
       try {
         const q = query(collection(db, "athletes"), where("email", "==", normalizeEmail(athleteEmail)));
         const snapshot = await getDocs(q);
@@ -434,42 +418,47 @@ function AthleteApp({ currentUser }: { currentUser: AuthUser }) {
         athleteData.macrocycles = macros;
         setAthlete(athleteData);
 
-        const blocksObj: Record<string, DailyBlock[]> = {};
-        const fetchPromises = [];
-        for (const macro of macros) {
-          for (const meso of macro.mesocycles || []) {
-            const fetchTask = async () => {
-              const docRef = doc(db, "mesocycleBlocks", meso.id);
-              const docSnap = await getDoc(docRef);
-              if (docSnap.exists() && docSnap.data().blocks) {
-                blocksObj[meso.id] = Object.values(docSnap.data().blocks);
-              } else {
-                blocksObj[meso.id] = [];
-              }
-            };
-            fetchPromises.push(fetchTask());
-          }
-        }
-        await Promise.all(fetchPromises);
-        setBlocksByMesocycle(blocksObj);
+        // Carga en dos pasos: primero los mesociclos que tocan esta semana o el
+        // futuro (lo que el atleta ve al entrar) y después, en segundo plano, los pasados.
+        const weekStart = mondayOfCurrentWeek();
+        const allMesos = macros.flatMap((macro) => macro.mesocycles || []);
+        const priorityMesos = allMesos.filter((meso) => meso.endDate >= weekStart);
+        pastMesos = allMesos.filter((meso) => meso.endDate < weekStart);
+
+        const priorityBlocks = await fetchBlocksFor(priorityMesos);
+        setBlocksByMesocycle(priorityBlocks);
       } catch (error) { console.error(error); }
       finally { setIsLoading(false); }
+
+      if (pastMesos.length === 0) return;
+      try {
+        const pastBlocks = await fetchBlocksFor(pastMesos);
+        setBlocksByMesocycle((prev) => ({ ...pastBlocks, ...prev }));
+      } catch (error) {
+        console.error("Error al traer los bloques de mesociclos pasados:", error);
+        // Los marcamos como vacíos para que AthleteView no quede con el skeleton para siempre
+        setBlocksByMesocycle((prev) => {
+          const next = { ...prev };
+          pastMesos.forEach((meso) => { next[meso.id] ??= []; });
+          return next;
+        });
+      }
     }
     fetchAthleteData();
   }, [athleteEmail]);
 
-  if (isLoading) return <LoadingScreen message="Buscando tu planificación..." variant="dark" />;
+  if (isLoading) return <GlobalLoader message="Buscando tu planificación..." />;
 
   if (!athlete) {
     return (
-      <div className="p-8 text-center text-gray-700 bg-slate-50 min-h-screen flex flex-col items-center justify-center">
-        <div className="bg-white p-8 rounded-3xl shadow-xl max-w-md w-full border border-slate-100">
-          <h2 className="text-3xl font-black text-slate-800 mb-2">¡Hola!</h2>
-          <p className="text-slate-500 mb-6">Iniciaste sesión como: <br /><strong className="text-blue-600">{athleteEmail}</strong></p>
-          <div className="bg-amber-50 border border-amber-200 text-amber-800 p-5 rounded-2xl mb-8">
+      <div className="p-8 text-center bg-[var(--ink-950)] min-h-[100dvh] flex flex-col items-center justify-center">
+        <div className="bg-[var(--ink-900)] p-8 rounded-3xl shadow-xl max-w-md w-full border border-[var(--line-800)]">
+          <h2 className="text-3xl font-black text-[var(--mist-100)] mb-2">¡Hola!</h2>
+          <p className="text-[var(--mist-500)] mb-6">Iniciaste sesión como: <br /><strong className="text-[var(--signal-500)]">{athleteEmail}</strong></p>
+          <div className="bg-amber-500/10 border border-amber-500/30 text-amber-300 p-5 rounded-2xl mb-8">
             <p className="font-medium text-sm">Tu entrenador aún no ha vinculado tu cuenta a tu perfil de atleta. Pedile que te agregue usando este correo.</p>
           </div>
-          <button onClick={() => signOut(auth)} className="w-full bg-slate-900 hover:bg-black text-white font-bold py-3.5 rounded-xl transition-all shadow-lg active:scale-95 flex items-center justify-center gap-2">
+          <button onClick={() => signOut(auth)} className="w-full bg-[var(--ink-800)] hover:bg-[var(--line-800)] text-[var(--mist-100)] border border-[var(--line-800)] font-bold py-3.5 rounded-xl transition-all shadow-lg active:scale-95 flex items-center justify-center gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--signal-500)]">
             <LogOut size={18} /> Cerrar Sesión
           </button>
         </div>

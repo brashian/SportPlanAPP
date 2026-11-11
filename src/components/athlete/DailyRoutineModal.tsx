@@ -153,10 +153,11 @@ const ExerciseCard = memo(function ExerciseCard({
 export default function DailyRoutineModal({ block, onClose }: Props) {
   const progressKey = `routine-progress-${block.id}`;
 
-  // Progreso persistido: si el atleta cierra y reabre el modal, no pierde lo marcado
+  // Progreso persistido en localStorage: sobrevive a cerrar la pestaña o la app.
+  // sessionStorage queda como respaldo para el progreso guardado antes del cambio.
   const [completedExercises, setCompletedExercises] = useState<string[]>(() => {
     try {
-      const saved = sessionStorage.getItem(progressKey);
+      const saved = localStorage.getItem(progressKey) ?? sessionStorage.getItem(progressKey);
       return saved ? JSON.parse(saved) : [];
     } catch {
       return [];
@@ -172,9 +173,9 @@ export default function DailyRoutineModal({ block, onClose }: Props) {
 
   useEffect(() => {
     try {
-      sessionStorage.setItem(progressKey, JSON.stringify(completedExercises));
+      localStorage.setItem(progressKey, JSON.stringify(completedExercises));
     } catch {
-      // sessionStorage puede fallar en modo privado; no es crítico, seguimos sin persistir
+      // localStorage puede fallar en modo privado; no es crítico, seguimos sin persistir
     }
   }, [completedExercises, progressKey]);
 

@@ -2,10 +2,46 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Design tokens globales: mismos valores que definen LoginView, CoachLayout y
+   AthleteLayout. Están acá para que las pantallas que se ven antes de esos
+   layouts (carga inicial, errores, avisos) usen la misma paleta. */
+:root {
+  --ink-950: #0A0E14;
+  --ink-900: #10161F;
+  --ink-850: #161D29;
+  --ink-800: #1D2530;
+  --line-800: #232B37;
+  --mist-500: #6B7684;
+  --mist-300: #9AA4B2;
+  --mist-100: #E7EAEE;
+  --signal-500: #FF5A1F;
+  --signal-600: #E64A0F;
+  --pulse-500: #34D399;
+}
+
 html, body, #root {
   height: 100%;
 }
 
 body {
-  background-color: #f9fafb;
+  background-color: var(--ink-950);
+}
+
+.font-display {
+  font-family: 'Barlow Condensed', system-ui, sans-serif;
+}
+
+/* Brillo que recorre el <Skeleton /> (animate-[shimmer_2s_infinite]) */
+@keyframes shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+/* Quien pidió "reducir movimiento" en su sistema no ve animaciones de entrada ni el brillo */
+@media (prefers-reduced-motion: reduce) {
+  .animate-in,
+  .animate-\[shimmer_2s_infinite\] {
+    animation: none !important;
+  }
 }

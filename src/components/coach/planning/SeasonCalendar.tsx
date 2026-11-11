@@ -5,13 +5,17 @@ import { db } from '../../../firebase';
 import { usePlanningStore } from '../../../store/usePlanningStore';
 
 export default function SeasonCalendar() {
-  const { activeCategoryId, setSelectedSession, selectedSession } = usePlanningStore();
+  const { activeCategoryId, setSelectedSession } = usePlanningStore();
   const [currentDate, setCurrentDate] = useState(new Date());
   
   const [trainings, setTrainings] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(false);
 
+  // Se recarga al cambiar de categoría y cada vez que el calendario se vuelve a
+  // montar (al volver del editor), así aparece lo recién guardado.
   useEffect(() => {
+    // Descarta la respuesta de una categoría anterior si el coach cambia rápido
+    let cancelled = false;
     async function fetchTrainings() {
       if (!activeCategoryId) return;
       setIsLoading(true);
@@ -20,15 +24,16 @@ export default function SeasonCalendar() {
         const snap = await getDocs(q);
         const loaded: any[] = [];
         snap.forEach(doc => { loaded.push({ id: doc.id, ...doc.data() }); });
-        setTrainings(loaded);
+        if (!cancelled) setTrainings(loaded);
       } catch (error) {
-        console.error("Error al traer entrenamientos:", error);
+        if (!cancelled) console.error("Error al traer entrenamientos:", error);
       } finally {
-        setIsLoading(false);
+        if (!cancelled) setIsLoading(false);
       }
     }
     fetchTrainings();
-  }, [activeCategoryId, selectedSession]); 
+    return () => { cancelled = true; };
+  }, [activeCategoryId]);
 
   if (!activeCategoryId) {
     return (

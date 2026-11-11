@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, Suspense } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { collection, query, where, getDocs, doc, setDoc, updateDoc, deleteDoc } from "firebase/firestore";
 import { db } from "../../firebase";
@@ -14,15 +14,22 @@ import MesocycleFormModal from "./athlete-detail/MesocycleFormModal";
 import EditAthleteModal from "./athlete-detail/EditAthleteModal";
 import PasteTemplateModal from "./athlete-detail/PasteTemplateModal";
 import InjectRoutineModal from "./athlete-detail/InjectRoutineModal";
-import DailyBlockEditorModal from "./athlete-detail/DailyBlockEditorModal";
+import GlobalLoader from "../ui/GlobalLoader";
+import AthleteDetailSkeleton from "./athlete-detail/AthleteDetailSkeleton";
+import { lazyWithRetry } from "../../utils/lazyWithRetry";
 import { sortMesosByStart } from "./athlete-detail/dateHelpers";
 import { usePlanningForms } from "./athlete-detail/hooks/usePlanningForms";
 import { useBlockCalendar } from "./athlete-detail/hooks/useBlockCalendar";
 import { useRoutineInjection } from "./athlete-detail/hooks/useRoutineInjection";
 import type { AthleteFormData } from "./athlete-detail/types";
 
+// El editor trae Quill (~240 kB): se descarga recién al abrir "Cargar Sesión" / "Editar"
+const DailyBlockEditorModal = lazyWithRetry(() => import("./athlete-detail/DailyBlockEditorModal"));
+
 interface AthleteDetailViewProps {
   athletes: Athlete[];
+  // true mientras CoachApp sigue trayendo la lista (ej. se entró directo a /athletes/:id)
+  isLoadingAthletes: boolean;
   onLoadMacrocycles: (athleteId: string, macros: Macrocycle[]) => void;
   onCreateMacrocycle: (athleteId: string, data: { name: string; startDate: string; endDate: string }) => void;
   onUpdateMacrocycle: (macrocycleId: string, data: { name: string; startDate: string; endDate: string }) => Promise<void>;
@@ -37,7 +44,7 @@ interface AthleteDetailViewProps {
 }
 
 export default function AthleteDetailView({
-  athletes, onLoadMacrocycles, onCreateMacrocycle, onUpdateMacrocycle, onDeleteMacrocycle,
+  athletes, isLoadingAthletes, onLoadMacrocycles, onCreateMacrocycle, onUpdateMacrocycle, onDeleteMacrocycle,
   onCreateMesocycle, onUpdateMesocycle, onDeleteMesocycle, onUpdateAthlete, onDeleteAthlete
 }: AthleteDetailViewProps) {
   const { athleteId } = useParams<{ athleteId: string }>();
@@ -144,7 +151,8 @@ export default function AthleteDetailView({
     // Descarta respuestas de un atleta anterior si el coach navega rápido entre perfiles
     let cancelled = false;
     async function fetchMacrocycles() {
-      if (!athleteId) return;
+      // Esperamos a que exista el atleta en la lista: si no, onLoadMacrocycles no tendría dónde guardarlos
+      if (!athleteId || isLoadingAthletes) return;
       setIsLoadingMacros(true);
       try {
         const q = query(collection(db, "macrocycles"), where("athleteId", "==", athleteId));
@@ -163,12 +171,14 @@ export default function AthleteDetailView({
     }
     fetchMacrocycles();
     return () => { cancelled = true; };
-  }, [athleteId]);
+  }, [athleteId, isLoadingAthletes]);
+
+  // ── Lista de atletas todavía en camino ──────────────────────────────────────
+  if (isLoadingAthletes) return <AthleteDetailSkeleton />;
 
   // ── Estado "atleta no encontrado" ───────────────────────────────────────────
-  // CoachApp muestra su skeleton hasta que llega la lista de atletas, así que
-  // cuando esta vista se renderiza la lista ya está cargada: si el id no está,
-  // el atleta no existe (o fue borrado) — no está "cargando".
+  // La lista ya terminó de cargar: si el id no está, el atleta no existe (o
+  // fue borrado) — no está "cargando".
   if (!athlete) {
     return (
       <div className="p-12 max-w-lg mx-auto text-center flex flex-col items-center">
@@ -338,14 +348,16 @@ export default function AthleteDetailView({
 
       {/* EDITOR DE BLOQUES DIARIOS */}
       {calendar.isBlockModalOpen && calendar.activeBlockContext && (
-        <DailyBlockEditorModal
-          context={calendar.activeBlockContext}
-          formData={calendar.blockFormData}
-          setFormData={calendar.setBlockFormData}
-          isSubmitting={isSubmitting}
-          onSubmit={calendar.handleBlockSubmit}
-          onClose={() => calendar.setIsBlockModalOpen(false)}
-        />
+        <Suspense fallback={<GlobalLoader message="Abriendo editor..." />}>
+          <DailyBlockEditorModal
+            context={calendar.activeBlockContext}
+            formData={calendar.blockFormData}
+            setFormData={calendar.setBlockFormData}
+            isSubmitting={isSubmitting}
+            onSubmit={calendar.handleBlockSubmit}
+            onClose={() => calendar.setIsBlockModalOpen(false)}
+          />
+        </Suspense>
       )}
 
       {isEditAthleteModalOpen && (

@@ -1,9 +1,11 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback, Suspense } from 'react';
 import { collection, query, where, getDocs, doc, setDoc, updateDoc, arrayUnion, deleteDoc } from 'firebase/firestore';
 import { db, auth } from '../../firebase';
 import { usePlanningStore } from '../../store/usePlanningStore';
 import SeasonCalendar from './planning/SeasonCalendar';
-import TrainingEditor from './planning/TrainingEditor';
+import { Skeleton } from '../ui/Skeleton';
+import { lazyWithRetry } from '../../utils/lazyWithRetry';
+import Toast, { type ToastState } from '../shared/Toast';
 import { Club } from '../../types/planning';
 import { ChevronDown, Users, Plus, Menu, X, Shield, Pencil, Trash2 } from 'lucide-react';
 
@@ -12,6 +14,19 @@ const tokens = {
   "--line-800": "#232B37", "--mist-500": "#6B7684", "--mist-300": "#9AA4B2", "--mist-100": "#E7EAEE",
   "--signal-500": "#FF5A1F", "--signal-600": "#E64A0F", "--pulse-500": "#34D399",
 } as React.CSSProperties;
+
+// El editor trae Quill (~240 kB): se descarga recién al abrir una sesión del calendario
+const TrainingEditor = lazyWithRetry(() => import('./planning/TrainingEditor'));
+
+function TrainingEditorSkeleton() {
+  return (
+    <div className="h-full w-full p-4 sm:p-6 space-y-4" aria-busy="true" aria-live="polite">
+      <Skeleton className="h-12 w-2/3" />
+      <Skeleton className="h-24 w-full" />
+      <Skeleton className="h-64 w-full rounded-[2rem]" />
+    </div>
+  );
+}
 
 const LogoPlaceholder = () => (
   <div className="flex items-center gap-2 text-[var(--mist-100)]">
@@ -33,62 +48,101 @@ export default function PlanningView() {
   const [editingCatName, setEditingCatName] = useState("");
   const [clubToDelete, setClubToDelete] = useState<string | null>(null);
   const [catToDelete, setCatToDelete] = useState<{clubId: string, catId: string} | null>(null);
+  const [isLoadingClubs, setIsLoadingClubs] = useState(true);
+
+  const [toast, setToast] = useState<ToastState | null>(null);
+  const showToast = useCallback((type: ToastState['type'], message: string) => setToast({ type, message }), []);
+  // Referencia estable: si cambiara en cada render, el temporizador del Toast se reiniciaría sin parar
+  const dismissToast = useCallback(() => setToast(null), []);
 
   useEffect(() => {
     async function fetchClubs() {
       const coachId = auth.currentUser?.uid;
-      if (!coachId) return;
-      const q = query(collection(db, "clubs"), where("coachId", "==", coachId));
-      const snap = await getDocs(q);
-      const loaded: Club[] = [];
-      snap.forEach(d => loaded.push({ id: d.id, ...d.data() } as Club));
-      setClubs(loaded);
+      if (!coachId) { setIsLoadingClubs(false); return; }
+      try {
+        const q = query(collection(db, "clubs"), where("coachId", "==", coachId));
+        const snap = await getDocs(q);
+        const loaded: Club[] = [];
+        snap.forEach(d => loaded.push({ id: d.id, ...d.data() } as Club));
+        setClubs(loaded);
+      } catch (error) {
+        console.error("Error al traer los clubes:", error);
+        showToast('error', 'No se pudieron cargar los clubes.');
+      } finally {
+        setIsLoadingClubs(false);
+      }
     }
     fetchClubs();
-  }, [setClubs]);
+  }, [setClubs, showToast]);
 
+  // En todas las acciones: si Firestore falla, el input queda abierto con lo escrito para reintentar
   const submitClub = async () => {
     if (!newClubName.trim()) { setIsAddingClub(false); return; }
     const coachId = auth.currentUser?.uid;
     if (!coachId) return;
-    const newRef = doc(collection(db, "clubs"));
-    const newClub: any = { id: newRef.id, coachId: coachId, name: newClubName.trim(), categories: [] };
-    await setDoc(newRef, newClub);
-    setClubs([...clubs, newClub as Club]);
-    setNewClubName(""); setIsAddingClub(false);
+    try {
+      const newRef = doc(collection(db, "clubs"));
+      const newClub: any = { id: newRef.id, coachId: coachId, name: newClubName.trim(), categories: [] };
+      await setDoc(newRef, newClub);
+      setClubs([...clubs, newClub as Club]);
+      setNewClubName(""); setIsAddingClub(false);
+    } catch (error) {
+      console.error("Error al crear el club:", error);
+      showToast('error', 'No se pudo crear el club.');
+    }
   };
 
   const submitEditClub = async (clubId: string) => {
     if (!editingClubName.trim()) { setEditingClubId(null); return; }
-    await updateDoc(doc(db, "clubs", clubId), { name: editingClubName.trim() });
-    setClubs(clubs.map((c: Club) => c.id === clubId ? { ...c, name: editingClubName.trim() } : c));
-    setEditingClubId(null);
+    try {
+      await updateDoc(doc(db, "clubs", clubId), { name: editingClubName.trim() });
+      setClubs(clubs.map((c: Club) => c.id === clubId ? { ...c, name: editingClubName.trim() } : c));
+      setEditingClubId(null);
+    } catch (error) {
+      console.error("Error al editar el club:", error);
+      showToast('error', 'No se pudo editar el club.');
+    }
   };
 
   const confirmDeleteClub = async () => {
     if (!clubToDelete) return;
-    await deleteDoc(doc(db, "clubs", clubToDelete));
-    setClubs(clubs.filter((c: Club) => c.id !== clubToDelete));
-    if (activeClubId === clubToDelete) setActiveClub(null);
-    setClubToDelete(null);
+    try {
+      await deleteDoc(doc(db, "clubs", clubToDelete));
+      setClubs(clubs.filter((c: Club) => c.id !== clubToDelete));
+      if (activeClubId === clubToDelete) setActiveClub(null);
+      setClubToDelete(null);
+    } catch (error) {
+      console.error("Error al borrar el club:", error);
+      showToast('error', 'No se pudo borrar el club.');
+    }
   };
 
   const submitCategory = async (clubId: string) => {
     if (!newCategoryName.trim()) { setAddingCategoryTo(null); return; }
-    const newCat = { id: Date.now().toString(), clubId, name: newCategoryName.trim() };
-    await updateDoc(doc(db, "clubs", clubId), { categories: arrayUnion(newCat) });
-    setClubs(clubs.map((c: Club) => c.id === clubId ? { ...c, categories: [...c.categories, newCat] } : c));
-    setNewCategoryName(""); setAddingCategoryTo(null);
+    try {
+      const newCat = { id: Date.now().toString(), clubId, name: newCategoryName.trim() };
+      await updateDoc(doc(db, "clubs", clubId), { categories: arrayUnion(newCat) });
+      setClubs(clubs.map((c: Club) => c.id === clubId ? { ...c, categories: [...c.categories, newCat] } : c));
+      setNewCategoryName(""); setAddingCategoryTo(null);
+    } catch (error) {
+      console.error("Error al crear la categoría:", error);
+      showToast('error', 'No se pudo crear la categoría.');
+    }
   };
 
   const submitEditCategory = async (clubId: string, catId: string) => {
     if (!editingCatName.trim()) { setEditingCatId(null); return; }
     const club = clubs.find((c: Club) => c.id === clubId);
     if (!club) return;
-    const updatedCats = club.categories.map((cat: any) => cat.id === catId ? { ...cat, name: editingCatName.trim() } : cat);
-    await updateDoc(doc(db, "clubs", clubId), { categories: updatedCats });
-    setClubs(clubs.map((c: Club) => c.id === clubId ? { ...c, categories: updatedCats } : c));
-    setEditingCatId(null);
+    try {
+      const updatedCats = club.categories.map((cat: any) => cat.id === catId ? { ...cat, name: editingCatName.trim() } : cat);
+      await updateDoc(doc(db, "clubs", clubId), { categories: updatedCats });
+      setClubs(clubs.map((c: Club) => c.id === clubId ? { ...c, categories: updatedCats } : c));
+      setEditingCatId(null);
+    } catch (error) {
+      console.error("Error al editar la categoría:", error);
+      showToast('error', 'No se pudo editar la categoría.');
+    }
   };
 
   const confirmDeleteCategory = async () => {
@@ -96,11 +150,16 @@ export default function PlanningView() {
     const { clubId, catId } = catToDelete;
     const club = clubs.find((c: Club) => c.id === clubId);
     if (!club) return;
-    const updatedCats = club.categories.filter((cat: any) => cat.id !== catId);
-    await updateDoc(doc(db, "clubs", clubId), { categories: updatedCats });
-    setClubs(clubs.map((c: Club) => c.id === clubId ? { ...c, categories: updatedCats } : c));
-    if (activeCategoryId === catId) setActiveCategory(null);
-    setCatToDelete(null);
+    try {
+      const updatedCats = club.categories.filter((cat: any) => cat.id !== catId);
+      await updateDoc(doc(db, "clubs", clubId), { categories: updatedCats });
+      setClubs(clubs.map((c: Club) => c.id === clubId ? { ...c, categories: updatedCats } : c));
+      if (activeCategoryId === catId) setActiveCategory(null);
+      setCatToDelete(null);
+    } catch (error) {
+      console.error("Error al borrar la categoría:", error);
+      showToast('error', 'No se pudo borrar la categoría.');
+    }
   };
 
   return (
@@ -139,7 +198,13 @@ export default function PlanningView() {
             </div>
           )}
 
-          {clubs.length === 0 && !isAddingClub && (
+          {isLoadingClubs && (
+            <div className="space-y-3" aria-busy="true" aria-live="polite">
+              {[0, 1, 2].map((i) => <Skeleton key={i} className="h-16 w-full" style={{ animationDelay: `${i * 60}ms` }} />)}
+            </div>
+          )}
+
+          {!isLoadingClubs && clubs.length === 0 && !isAddingClub && (
             <div className="text-center mt-8 p-6 border border-[var(--line-800)] rounded-2xl bg-[var(--ink-850)]">
               <Shield size={32} className="mx-auto text-[var(--mist-500)] mb-2" />
               <p className="text-xs font-medium text-[var(--mist-500)]">No hay clubes en tu radar. Creá el primero.</p>
@@ -237,8 +302,14 @@ export default function PlanningView() {
       </div>
 
       <div className="flex-1 relative overflow-hidden h-full z-10 bg-[var(--ink-950)]">
-        {selectedSession ? <TrainingEditor /> : <SeasonCalendar />}
+        {selectedSession ? (
+          <Suspense fallback={<TrainingEditorSkeleton />}>
+            <TrainingEditor />
+          </Suspense>
+        ) : <SeasonCalendar />}
       </div>
+
+      <Toast toast={toast} onDismiss={dismissToast} />
     </div>
   );
 }

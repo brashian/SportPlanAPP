@@ -1,9 +1,11 @@
-import React, { useState, useMemo, useCallback, Suspense } from "react";
+import { useState, useMemo, useCallback, Suspense } from "react";
 import type { Athlete, DailyBlock } from "../../types/models";
 import { Flame, Dumbbell, ChevronDown, Calendar as CalendarIcon, Activity, Trophy, ChevronRight, CheckCircle2 } from "lucide-react";
-import GlobalLoader from "../ui/GlobalLoader"; // <-- Usamos el nuevo loader premium
+import GlobalLoader from "../ui/GlobalLoader";
+import { Skeleton } from "../ui/Skeleton";
+import { lazyWithRetry } from "../../utils/lazyWithRetry";
 
-const DailyRoutineModal = React.lazy(() => import("./DailyRoutineModal"));
+const DailyRoutineModal = lazyWithRetry(() => import("./DailyRoutineModal"));
 
 interface Props {
   athlete: Athlete;
@@ -46,7 +48,8 @@ const isRoutineFullyCompleted = (block?: DailyBlock | null): boolean => {
   const total = block.exercises?.length ?? 0;
   if (total === 0) return false;
   try {
-    const saved = sessionStorage.getItem(`routine-progress-${block.id}`);
+    const key = `routine-progress-${block.id}`;
+    const saved = localStorage.getItem(key) ?? sessionStorage.getItem(key);
     if (!saved) return false;
     const completed = JSON.parse(saved);
     return Array.isArray(completed) && completed.length >= total;
@@ -243,7 +246,13 @@ export default function AthleteView({ athlete, blocksByMesocycle }: Props) {
 
                         {isOpen && (
                           <div className="p-4 sm:p-6 bg-[var(--ink-950)]/40 space-y-4 border-t border-[var(--line-800)] motion-safe:animate-in motion-safe:slide-in-from-top-4 motion-safe:duration-300">
-                            {mesoWeeks.map((week, idx) => (
+                            {/* Mesociclo pasado cuyos bloques todavía llegan en segundo plano */}
+                            {blocksByMesocycle[meso.id] === undefined ? (
+                              <div className="space-y-4" aria-busy="true" aria-live="polite">
+                                <Skeleton className="h-28 w-full" />
+                                <Skeleton className="h-28 w-full" />
+                              </div>
+                            ) : mesoWeeks.map((week, idx) => (
                               <div key={idx} className="bg-[var(--ink-900)]/60 border border-[var(--line-800)] rounded-2xl p-4 sm:p-5">
                                 <h5 className="text-[10px] font-bold text-[var(--mist-500)] uppercase tracking-widest mb-4 pl-1">{week.label}</h5>
 

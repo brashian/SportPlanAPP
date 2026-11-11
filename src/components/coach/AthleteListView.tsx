@@ -4,13 +4,29 @@ import { Users, Search, Plus, X, ChevronRight, Activity, Loader2, AlertCircle } 
 import type { Athlete } from "../../types/models";
 import { athleteFullName } from "../../types/models";
 import ModalShell from "../shared/ModalShell";
+import { Skeleton } from "../ui/Skeleton";
 
 interface Props {
   athletes: Athlete[];
+  // true mientras llega la lista de atletas
+  isLoading: boolean;
+  // true mientras llegan los macrociclos (solo afecta al contador de cada tarjeta)
+  areMacrosLoading: boolean;
   onCreateAthlete: (data: { name: string; sport: string; email?: string; phone?: string }) => Promise<void>;
 }
 
-export default function AthleteListView({ athletes, onCreateAthlete }: Props) {
+// Skeleton de la grilla: muestra la forma de las tarjetas que están por llegar
+function AthleteGridSkeleton() {
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6" aria-busy="true" aria-live="polite">
+      {[0, 1, 2, 3, 4, 5].map((i) => (
+        <Skeleton key={i} className="h-44 rounded-3xl" style={{ animationDelay: `${i * 60}ms` }} />
+      ))}
+    </div>
+  );
+}
+
+export default function AthleteListView({ athletes, isLoading, areMacrosLoading, onCreateAthlete }: Props) {
   const navigate = useNavigate();
   const [searchTerm, setSearchTerm] = useState("");
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -90,7 +106,9 @@ export default function AthleteListView({ athletes, onCreateAthlete }: Props) {
         />
       </div>
 
-      {athletes.length === 0 ? (
+      {isLoading ? (
+        <AthleteGridSkeleton />
+      ) : athletes.length === 0 ? (
         <div className="p-16 text-center border-2 border-dashed border-[var(--line-800)] rounded-3xl bg-[var(--ink-900)]/50 flex flex-col items-center">
           <Users size={56} className="text-[var(--mist-500)] mb-4" />
           <p className="text-xl font-display font-bold text-[var(--mist-100)] uppercase tracking-wide">Aún no tenés atletas</p>
@@ -135,7 +153,12 @@ export default function AthleteListView({ athletes, onCreateAthlete }: Props) {
 
                 <div className="mt-auto pt-4 border-t border-[var(--line-800)] flex justify-between items-center">
                   <span className="flex items-center gap-1.5 text-xs font-bold text-[var(--mist-500)]">
-                    <Activity size={14} /> {(athlete.macrocycles || []).length} Macros
+                    <Activity size={14} />
+                    {areMacrosLoading && (athlete.macrocycles || []).length === 0 ? (
+                      <Skeleton className="h-3 w-14 rounded" aria-label="Cargando macrociclos" />
+                    ) : (
+                      <>{(athlete.macrocycles || []).length} Macros</>
+                    )}
                   </span>
                   <div className="w-8 h-8 rounded-full bg-[var(--ink-800)] flex items-center justify-center group-hover:bg-[var(--signal-500)]/15 transition-colors">
                     <ChevronRight size={18} className="text-[var(--mist-500)] group-hover:text-[var(--signal-500)]" />

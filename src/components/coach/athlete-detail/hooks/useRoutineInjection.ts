@@ -53,12 +53,13 @@ export function useRoutineInjection({
       if (!athlete?.coachId) return;
       try {
         const qT = query(collection(db, "routineTemplates"), where("coachId", "==", athlete.coachId));
-        const snapT = await getDocs(qT);
+        const qM = query(collection(db, "monthlyRoutines"), where("athleteId", "==", athleteId));
+        // Las dos consultas son independientes: van en paralelo
+        const [snapT, snapM] = await Promise.all([getDocs(qT), getDocs(qM)]);
+
         const loadedT: RoutineTemplate[] = [];
         snapT.forEach(doc => loadedT.push({ id: doc.id, ...doc.data() } as RoutineTemplate));
 
-        const qM = query(collection(db, "monthlyRoutines"), where("athleteId", "==", athleteId));
-        const snapM = await getDocs(qM);
         const loadedM: MonthlyRoutine[] = [];
         snapM.forEach(doc => loadedM.push({ id: doc.id, ...doc.data() } as MonthlyRoutine));
 

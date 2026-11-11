@@ -1,17 +1,26 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { Dumbbell, ArrowLeft, Save, Clock, Flame, Eraser, PenTool, Minus, Circle, X as XIcon } from 'lucide-react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { ArrowLeft, Save, Clock, Flame, Eraser, PenTool, Minus, Circle, X as XIcon } from 'lucide-react';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { db } from '../../../firebase';
 import { usePlanningStore } from '../../../store/usePlanningStore';
 import ReactQuill from 'react-quill';
 import 'react-quill/dist/quill.snow.css';
+import Toast, { type ToastState } from '../../shared/Toast';
+import { Skeleton } from '../../ui/Skeleton';
 
 type DrawTool = 'freehand' | 'line' | 'playerO' | 'playerX';
 
 export default function TrainingEditor() {
   const { activeCategoryId, selectedSession, setSelectedSession } = usePlanningStore();
   const [isSubmitting, setIsSubmitting] = useState(false);
-  
+  // Mientras llega la sesión guardada no se puede editar ni guardar: evita pisarla con campos vacíos
+  const [isLoadingSession, setIsLoadingSession] = useState(true);
+
+  const [toast, setToast] = useState<ToastState | null>(null);
+  const showToast = useCallback((type: ToastState['type'], message: string) => setToast({ type, message }), []);
+  // Referencia estable: si cambiara en cada render, el temporizador del Toast se reiniciaría sin parar
+  const dismissToast = useCallback(() => setToast(null), []);
+
   const [tool, setTool] = useState<DrawTool>('freehand');
   const [isDrawing, setIsDrawing] = useState(false);
   const [startPos, setStartPos] = useState({ x: 0, y: 0 });
@@ -32,30 +41,38 @@ export default function TrainingEditor() {
 
   useEffect(() => {
     async function loadSession() {
-      if (!sessionId) return;
-      const docRef = doc(db, "clubTrainings", sessionId);
-      const snap = await getDoc(docRef);
-      
-      if (snap.exists()) {
-        const data = snap.data();
-        setFormData({
-          sessionType: data.sessionType || "", intensity: data.intensity || "Media",
-          durationMinutes: data.durationMinutes || 90, notesHtml: data.notesHtml || "", drawingData: data.drawingData || ""
-        });
+      if (!sessionId) { setIsLoadingSession(false); return; }
+      setIsLoadingSession(true);
+      try {
+        const docRef = doc(db, "clubTrainings", sessionId);
+        const snap = await getDoc(docRef);
 
-        if (data.drawingData && canvasRef.current) {
-          const ctx = canvasRef.current.getContext('2d');
-          const img = new Image();
-          img.onload = () => {
-            ctx?.clearRect(0, 0, canvasRef.current!.width, canvasRef.current!.height);
-            ctx?.drawImage(img, 0, 0);
-          };
-          img.src = data.drawingData;
+        if (snap.exists()) {
+          const data = snap.data();
+          setFormData({
+            sessionType: data.sessionType || "", intensity: data.intensity || "Media",
+            durationMinutes: data.durationMinutes || 90, notesHtml: data.notesHtml || "", drawingData: data.drawingData || ""
+          });
+
+          if (data.drawingData && canvasRef.current) {
+            const ctx = canvasRef.current.getContext('2d');
+            const img = new Image();
+            img.onload = () => {
+              ctx?.clearRect(0, 0, canvasRef.current!.width, canvasRef.current!.height);
+              ctx?.drawImage(img, 0, 0);
+            };
+            img.src = data.drawingData;
+          }
         }
+      } catch (error) {
+        console.error("Error al cargar la sesión del club:", error);
+        showToast('error', 'No se pudo cargar la sesión.');
+      } finally {
+        setIsLoadingSession(false);
       }
     }
     loadSession();
-  }, [sessionId]);
+  }, [sessionId, showToast]);
 
   const getCoordinates = (e: React.MouseEvent | React.TouchEvent | MouseEvent | TouchEvent) => {
     if (!canvasRef.current) return { x: 0, y: 0 };
@@ -133,15 +150,18 @@ export default function TrainingEditor() {
   };
 
   const handleSave = async () => {
-    if (!sessionId || !activeCategoryId) return;
+    if (!sessionId || !activeCategoryId || isLoadingSession) return;
     setIsSubmitting(true);
     try {
       const docRef = doc(db, "clubTrainings", sessionId);
       await setDoc(docRef, {
         ...formData, teamId: activeCategoryId, date: selectedSession?.date.split('T')[0], updatedAt: new Date().toISOString()
       }, { merge: true });
-      alert("¡Entrenamiento guardado con éxito!");
-    } catch (error) { alert("Error al guardar la sesión."); } 
+      showToast('success', 'Entrenamiento guardado.');
+    } catch (error) {
+      console.error("Error al guardar la sesión del club:", error);
+      showToast('error', 'No se pudo guardar la sesión.');
+    }
     finally { setIsSubmitting(false); }
   };
 
@@ -169,7 +189,7 @@ export default function TrainingEditor() {
         </div>
         
         <button 
-          onClick={handleSave} disabled={isSubmitting}
+          onClick={handleSave} disabled={isSubmitting || isLoadingSession}
           className="bg-[var(--signal-500)] hover:bg-[var(--signal-600)] disabled:bg-[var(--signal-500)]/50 text-[var(--ink-950)] font-black px-6 py-3 rounded-xl shadow-lg transition-all flex items-center gap-2 active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--mist-100)]"
         >
           <Save size={18} /> <span className="hidden sm:inline">{isSubmitting ? 'Guardando...' : 'Guardar'}</span>
@@ -179,6 +199,12 @@ export default function TrainingEditor() {
       <div className="flex-1 p-4 sm:p-8 overflow-y-auto custom-scrollbar">
         <div className="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-6">
           
+          {isLoadingSession ? (
+            <div className="space-y-6" aria-busy="true" aria-live="polite">
+              <Skeleton className="h-52 w-full rounded-[2rem]" />
+              <Skeleton className="h-72 w-full rounded-[2rem]" />
+            </div>
+          ) : (
           <div className="space-y-6">
             {/* PANEL DE DATOS */}
             <div className="bg-[var(--ink-850)] p-6 sm:p-8 rounded-[2rem] border border-[var(--line-800)] shadow-lg">
@@ -222,11 +248,12 @@ export default function TrainingEditor() {
                 <ReactQuill 
                   theme="snow" 
                   value={formData.notesHtml} 
-                  onChange={(content) => setFormData({...formData, notesHtml: content})}
+                  onChange={(content: string) => setFormData({...formData, notesHtml: content})}
                 />
               </div>
             </div>
           </div>
+          )}
 
           <div className="bg-[var(--ink-850)] p-6 sm:p-8 rounded-[2rem] border border-[var(--line-800)] shadow-lg flex flex-col items-center">
             
@@ -264,7 +291,7 @@ export default function TrainingEditor() {
                 ref={canvasRef} width={300} height={600}
                 onMouseDown={startDrawing} onMouseMove={draw} onMouseUp={stopDrawing} onMouseLeave={stopDrawing}
                 onTouchStart={startDrawing} onTouchMove={draw} onTouchEnd={stopDrawing}
-                className={`absolute inset-0 w-full h-full z-10 ${tool === 'freehand' || tool === 'line' ? 'cursor-crosshair' : 'cursor-pointer'}`}
+                className={`absolute inset-0 w-full h-full z-10 ${isLoadingSession ? 'pointer-events-none' : ''} ${tool === 'freehand' || tool === 'line' ? 'cursor-crosshair' : 'cursor-pointer'}`}
               />
             </div>
             <p className="text-xs text-[var(--mist-500)] mt-5 text-center font-medium">
@@ -273,6 +300,8 @@ export default function TrainingEditor() {
           </div>
         </div>
       </div>
+
+      <Toast toast={toast} onDismiss={dismissToast} />
     </div>
   );
 }

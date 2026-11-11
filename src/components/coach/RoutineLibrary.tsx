@@ -1,12 +1,12 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { collection, query, where, getDocs, doc, setDoc, deleteDoc, updateDoc } from 'firebase/firestore';
 import { db } from '../../firebase';
 import type { RoutineTemplate, TemplateDay } from '../../types/models';
 import { FileText, Plus, Trash2, Edit3, X, Dumbbell, AlertTriangle, Save } from 'lucide-react';
-import ReactQuill from 'react-quill';
-import 'react-quill/dist/quill.snow.css';
 import BrandLogo from '../ui/BrandLogo';
 import { SkeletonCard } from '../ui/Skeleton'; // <-- Agregado
+import Toast, { type ToastState } from '../shared/Toast';
+import FormErrorAlert from '../shared/FormErrorAlert';
 
 // ... (Acá va el mismo const tokens y getBlockColor de antes sin cambios)
 const tokens = {
@@ -38,6 +38,11 @@ export default function RoutineLibrary({ coachId }: { coachId: string }) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [activeTab, setActiveTab] = useState(1);
   const [templateToDelete, setTemplateToDelete] = useState<string | null>(null);
+  const [formError, setFormError] = useState<string | null>(null);
+
+  const [toast, setToast] = useState<ToastState | null>(null);
+  // Referencia estable: si cambiara en cada render, el temporizador del Toast se reiniciaría sin parar
+  const dismissToast = useCallback(() => setToast(null), []);
 
   const [formData, setFormData] = useState<{ id?: string, name: string, days: TemplateDay[] }>({
     name: "", days: [{ dayNumber: 1, sessionType: "", exercises: [], notesHtml: "" }]
@@ -68,7 +73,7 @@ export default function RoutineLibrary({ coachId }: { coachId: string }) {
     } else {
       setFormData({ name: "", days: [{ dayNumber: 1, sessionType: "", exercises: [], notesHtml: "" }] });
     }
-    setActiveTab(1); setIsModalOpen(true);
+    setFormError(null); setActiveTab(1); setIsModalOpen(true);
   };
 
   const addDay = () => {
@@ -91,7 +96,8 @@ export default function RoutineLibrary({ coachId }: { coachId: string }) {
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.name.trim()) return alert("Ponele un nombre a la plantilla.");
+    if (!formData.name.trim()) { setFormError("Ponele un nombre a la plantilla."); return; }
+    setFormError(null);
     setIsSubmitting(true);
     try {
       if (formData.id) {
@@ -105,7 +111,11 @@ export default function RoutineLibrary({ coachId }: { coachId: string }) {
         setTemplates(prev => [...prev, newTemplate].sort((a, b) => a.name.localeCompare(b.name)));
       }
       setIsModalOpen(false);
-    } catch (error) { alert("Error al guardar la plantilla."); } 
+    } catch (error) {
+      // El modal queda abierto con los datos cargados para poder reintentar
+      console.error("Error al guardar la plantilla:", error);
+      setFormError("No se pudo guardar la plantilla. Revisá tu conexión y probá de nuevo.");
+    }
     finally { setIsSubmitting(false); }
   };
 
@@ -115,7 +125,10 @@ export default function RoutineLibrary({ coachId }: { coachId: string }) {
     try {
       await deleteDoc(doc(db, "routineTemplates", templateToDelete));
       setTemplates(prev => prev.filter(t => t.id !== templateToDelete));
-    } catch (error) { alert("Error al eliminar la plantilla."); } 
+    } catch (error) {
+      console.error("Error al eliminar la plantilla:", error);
+      setToast({ type: 'error', message: 'No se pudo eliminar la plantilla.' });
+    }
     finally { setIsSubmitting(false); setTemplateToDelete(null); }
   };
 
@@ -248,6 +261,11 @@ export default function RoutineLibrary({ coachId }: { coachId: string }) {
                 </div>
               </form>
             </div>
+            {formError && (
+              <div className="px-4 sm:px-5 pt-4 border-t border-[var(--line-800)] bg-[var(--ink-900)] shrink-0">
+                <FormErrorAlert message={formError} />
+              </div>
+            )}
             <div className="p-4 sm:p-5 border-t border-[var(--line-800)] bg-[var(--ink-900)] flex justify-end gap-3 shrink-0">
               <button type="button" onClick={() => setIsModalOpen(false)} className="px-6 py-3 bg-[var(--ink-800)] hover:bg-[var(--line-800)] rounded-xl font-bold text-sm text-[var(--mist-100)] transition-all active:scale-95">Cancelar</button>
               <button type="submit" form="libraryForm" disabled={isSubmitting} className="px-8 py-3 bg-[var(--signal-500)] hover:bg-[var(--signal-600)] text-[var(--ink-950)] rounded-xl font-black text-sm transition-all shadow-lg active:scale-95 flex items-center gap-2">
@@ -271,6 +289,8 @@ export default function RoutineLibrary({ coachId }: { coachId: string }) {
           </div>
         </div>
       )}
+
+      <Toast toast={toast} onDismiss={dismissToast} />
     </div>
   );
 }

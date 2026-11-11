@@ -29,5 +29,6 @@ module.exports = {
       },
     },
   },
-  plugins: [],
+  // Provee animate-in, fade-in, zoom-in-*, slide-in-from-*, fill-mode-* (usadas en toda la app)
+  plugins: [require("tailwindcss-animate")],
 };
